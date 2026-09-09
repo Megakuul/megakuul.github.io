@@ -7,10 +7,11 @@
   let lang = $state('js');
   let copiedId = $state('');
   let menuOpen = $state(false);
+  let visibleGroups = $derived(data.groups.filter(group => !group.nodeOnly || lang === 'js'));
 
   // Flatten groups + snippets into the leveled list the sidebar expects.
   let items = $derived(
-    data.groups.flatMap(group => [
+    visibleGroups.flatMap(group => [
       { id: group.id, title: group.title, level: 0 },
       ...group.snippets.map(s => ({ id: s.id, title: s.title, level: 1 })),
     ]),
@@ -94,11 +95,20 @@
       </p>
     </header>
 
-    {#each data.groups as group}
+    {#each visibleGroups as group}
       <section class="mb-16">
         <div id={group.id} data-anchor class="scroll-mt-24">
           <h2 class="text-2xl font-bold sm:text-3xl">{group.title}</h2>
-          <p class="mt-1 mb-6 text-slate-200/45">{group.blurb}</p>
+          {#if group.blurb}<p class="mt-1 mb-6 text-slate-200/45">{group.blurb}</p>{/if}
+          {#if group.downloads.length}
+            <div class="my-5 flex flex-wrap gap-3">
+              {#each group.downloads as download}
+                <a class="apple-glass rounded-lg px-4 py-2 text-sm" href={download.href} download
+                  >{download.title}</a
+                >
+              {/each}
+            </div>
+          {/if}
         </div>
 
         <div class="flex flex-col gap-6">

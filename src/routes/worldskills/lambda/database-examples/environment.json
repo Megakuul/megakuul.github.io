@@ -1,0 +1,17 @@
+{
+  "Variables": {
+    "DB_HOST": "database.example.com",
+    "DB_NAME": "app",
+    "DB_USER": "app_user",
+    "DB_PASSWORD": "replace-me",
+    "DB_CA_FILE": "/var/task/certs/rds.pem",
+    "ORACLE_CONNECT_STRING": "tcps://database.example.com:2484/ORCL?ssl_server_dn_match=true",
+    "MONGODB_URI": "mongodb://app_user:URL_ENCODED_PASSWORD@database.example.com:27017/app?authSource=admin&replicaSet=rs0&retryWrites=false",
+    "REDIS_URL": "rediss://app_user:URL_ENCODED_PASSWORD@database.example.com:6379",
+    "REDIS_CLUSTER": "false",
+    "CASSANDRA_DC": "eu-central-1",
+    "DSQL_HOST": "cluster.dsql.eu-central-1.on.aws",
+    "DSQL_USER": "admin",
+    "NODE_EXTRA_CA_CERTS": "/var/task/certs/rds.pem"
+  }
+}

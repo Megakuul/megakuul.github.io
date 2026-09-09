@@ -1,0 +1,87 @@
+#cloud-config
+package_update: true
+packages:
+- awscli-2
+ssh_pwauth: false
+disable_root: true
+users:
+- default
+- name: app
+  system: true
+  lock_passwd: true
+  shell: /sbin/nologin
+write_files:
+- path: /etc/bootstrap.env
+  owner: root:root
+  permissions: '0600'
+  defer: true
+  content: |
+    REGION=eu-central-1
+    BUCKET=my-artifacts-111122223333
+    OBJECT_KEY=native/server
+    OBJECT_VERSION=
+- path: /etc/app.env
+  owner: root:root
+  permissions: '0600'
+  defer: true
+  content: |
+    NODE_ENV=production
+    HOST=0.0.0.0
+    PORT=8080
+    AWS_DEFAULT_REGION=eu-central-1
+    DATA_DIR=/var/lib/app
+- path: /etc/systemd/system/app.service
+  owner: root:root
+  permissions: '0644'
+  defer: true
+  content: |
+    [Unit]
+    Description=Application
+    Wants=network-online.target
+    After=network-online.target
+    StartLimitIntervalSec=0
+
+    [Service]
+    User=app
+    Group=app
+    WorkingDirectory=/opt/app
+    EnvironmentFile=/etc/app.env
+    ExecStart=/opt/app/server
+    Restart=on-failure
+    RestartSec=5
+    TimeoutStopSec=30
+    NoNewPrivileges=true
+    PrivateTmp=true
+    ProtectSystem=strict
+    ProtectHome=true
+    StateDirectory=app
+    ReadWritePaths=/var/lib/app
+    UMask=0027
+    StandardOutput=journal
+    StandardError=journal
+
+    [Install]
+    WantedBy=multi-user.target
+- path: /usr/local/sbin/bootstrap-app
+  owner: root:root
+  permissions: '0700'
+  defer: true
+  content: |
+    #!/bin/bash
+    set -euo pipefail
+    source /etc/bootstrap.env
+    export AWS_DEFAULT_REGION="$REGION" AWS_PAGER="" AWS_RETRY_MODE=standard AWS_MAX_ATTEMPTS=10
+    install -d -m 0755 /opt/app
+    artifact=$(mktemp /opt/app/.download.XXXXXX)
+    trap 'rm -f "$artifact"' EXIT
+    args=(s3api get-object --bucket "$BUCKET" --key "$OBJECT_KEY")
+    if [[ -n "$OBJECT_VERSION" ]]; then args+=(--version-id "$OBJECT_VERSION"); fi
+    aws "${args[@]}" "$artifact" >/dev/null
+    install -o root -g root -m 0755 "$artifact" /opt/app/server
+    systemctl daemon-reload
+    systemctl enable --now app.service
+    systemctl is-active --quiet app.service
+runcmd:
+- - bash
+  - -e
+  - /usr/local/sbin/bootstrap-app

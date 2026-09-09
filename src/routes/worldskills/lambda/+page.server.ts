@@ -10,7 +10,7 @@ export const trailingSlash = 'always';
 export const load: PageServerLoad = async () => {
   const highlighter = await createHighlighter({
     themes: [dracula],
-    langs: ['javascript', 'python', 'json'],
+    langs: ['javascript', 'python', 'json', 'bash', 'sql'],
   });
 
   const render = (code: string, lang: string) =>
@@ -18,6 +18,8 @@ export const load: PageServerLoad = async () => {
 
   const rendered = groups.map(group => ({
     id: group.id,
+    nodeOnly: group.nodeOnly ?? false,
+    downloads: group.downloads ?? [],
     title: group.title,
     blurb: group.blurb,
     snippets: group.snippets.map(s => ({

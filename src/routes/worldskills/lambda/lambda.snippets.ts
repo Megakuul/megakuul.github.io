@@ -1,10 +1,12 @@
+import drivers from './database.snippets';
+
 /** Raw Lambda snippet catalogue. Highlighted at build time in +page.server.ts.
  *
  * Rules for the JS blobs: no backticks and no backslashes so they survive being
  * stored inside template literals verbatim. String concat instead of template
  * literals, replaceAll instead of regex.
  *
- * Every client and import lives once in the "Import everything" block. The rest
+ * Every AWS client and import lives once in the "Import everything" block. The rest
  * of the snippets assume those clients (s3, ddb, sqs, ...) already exist, so a
  * snippet pastes in right under the import block with nothing to wire up.
  */
@@ -21,6 +23,8 @@ export interface Snippet {
 }
 
 export interface Group {
+  nodeOnly?: boolean;
+  downloads?: { title: string; href: string }[];
   id: string;
   title: string;
   blurb: string;
@@ -30,7 +34,7 @@ export interface Group {
 const common: Group = {
   id: 'common',
   title: 'Common',
-  blurb: 'The three things every project needs pasted in on day one.',
+  blurb: 'Shared SDK imports and bundled binaries.',
   snippets: [
     {
       id: 'imports',
@@ -52,6 +56,7 @@ import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
 import { EventBridgeClient, PutEventsCommand } from '@aws-sdk/client-eventbridge';
 import { SFNClient, StartExecutionCommand, StartSyncExecutionCommand, SendTaskSuccessCommand, SendTaskFailureCommand } from '@aws-sdk/client-sfn';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
+import { BatchClient, SubmitJobCommand } from '@aws-sdk/client-batch';
 import { KinesisClient, PutRecordCommand } from '@aws-sdk/client-kinesis';
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 import { SSMClient, GetParameterCommand, GetParametersByPathCommand, PutParameterCommand } from '@aws-sdk/client-ssm';
@@ -80,6 +85,7 @@ const sns = new SNSClient({});
 const bus = new EventBridgeClient({});
 const sfn = new SFNClient({});
 const lambda = new LambdaClient({});
+const batchClient = new BatchClient({});
 const kinesis = new KinesisClient({});
 const secrets = new SecretsManagerClient({});
 const ssm = new SSMClient({});
@@ -109,6 +115,7 @@ sns = boto3.client("sns")
 bus = boto3.client("events")
 sfn = boto3.client("stepfunctions")
 lam = boto3.client("lambda")
+batch_client = boto3.client("batch")
 kinesis = boto3.client("kinesis")
 secrets = boto3.client("secretsmanager")
 ssm = boto3.client("ssm")
@@ -123,70 +130,6 @@ idp = boto3.client("cognito-idp")
 
 deserialize = TypeDeserializer().deserialize
 unmarshall = lambda img: {k: deserialize(v) for k, v in img.items()}`,
-    },
-    {
-      id: 'router',
-      title: 'Universal HTTP router',
-      note: 'Detects REST proxy (v1), HTTP API / Function URL (v2) and ALB, then switches on the templated route (routeKey / method + resource). Non-proxy integrations arrive as your mapping template instead, see below.',
-      js: `export const handler = async (event) => {
-  const v2 = event.requestContext?.http;
-  const alb = event.requestContext?.elb;
-  const method = v2?.method ?? event.httpMethod;
-  const path = event.rawPath ?? event.path;
-  const routeKey =
-    event.routeKey && event.routeKey !== '$default' ? event.routeKey : 
-    (event.resource ? event.httpMethod + ' ' + event.resource : method + ' ' + path);
-  const body = event.isBase64Encoded
-    ? Buffer.from(event.body, 'base64').toString()
-    : event.body;
-
-  const reply = (statusCode, data) => {
-    const base = { statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) };
-    if (alb) return { ...base, statusDescription: statusCode + ' OK', isBase64Encoded: false };
-    if (v2) return { ...base, cookies: [] };
-    return base;
-  };
-
-  switch (routeKey) {
-    case 'GET /health':
-      return reply(200, { ok: true, via: v2 ? 'httpv2' : alb ? 'alb' : 'restv1' });
-    case 'POST /users':
-      return reply(201, { created: JSON.parse(body ?? '{}') });
-    case 'GET /users/{id}':
-      return reply(200, { id: event.pathParameters?.id });
-    default:
-      return reply(404, { error: 'no route', routeKey });
-  }
-};`,
-      py: `def handler(event, context):
-    v2 = event.get("requestContext", {}).get("http")
-    alb = event.get("requestContext", {}).get("elb")
-    method = v2["method"] if v2 else event.get("httpMethod")
-    path = event.get("rawPath") or event.get("path")
-    route_key = (event.get("routeKey") if event.get("routeKey") != "$default" else None) or (
-        event["httpMethod"] + " " + event["resource"] if event.get("resource") else f"{method} {path}"
-    )
-    raw = base64.b64decode(event["body"]).decode() if event.get("isBase64Encoded") else event.get("body")
-
-    def reply(status, data):
-        base = {
-            "statusCode": status,
-            "headers": {"content-type": "application/json"},
-            "body": json.dumps(data),
-        }
-        if alb:
-            return {**base, "statusDescription": f"{status} OK", "isBase64Encoded": False}
-        if v2:
-            return {**base, "cookies": []}
-        return base
-
-    if route_key == "GET /health":
-        return reply(200, {"ok": True, "via": "httpv2" if v2 else "alb" if alb else "restv1"})
-    if route_key == "POST /users":
-        return reply(201, {"created": json.loads(raw or "{}")})
-    if route_key == "GET /users/{id}":
-        return reply(200, {"id": (event.get("pathParameters") or {}).get("id")})
-    return reply(404, {"error": "no route", "routeKey": route_key})`,
     },
     {
       id: 'exec-binary',
@@ -231,17 +174,17 @@ const incoming: Group = {
       js: `export const handler = async (event) => {
   const { httpMethod, path, resource, pathParameters, queryStringParameters, headers, body, isBase64Encoded, requestContext } = event;
   const raw = isBase64Encoded ? Buffer.from(body, 'base64').toString() : body;
-  const user = requestContext.authorizer?.claims?.sub ?? requestContext.identity.sourceIp;
+  const user = requestContext.authorizer?.claims?.sub ?? requestContext.identity?.sourceIp;
   return {
     statusCode: 200,
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ httpMethod, path, resource, pathParameters, queryStringParameters, trace: headers['x-trace'], stage: requestContext.stage, user, raw }),
+    body: JSON.stringify({ httpMethod, path, resource, pathParameters, queryStringParameters, trace: headers?.['x-trace'], stage: requestContext.stage, user, raw }),
   };
 };`,
       py: `def handler(event, context):
     ctx = event["requestContext"]
     raw = base64.b64decode(event["body"]).decode() if event.get("isBase64Encoded") else event.get("body")
-    user = ctx.get("authorizer", {}).get("claims", {}).get("sub") or ctx["identity"]["sourceIp"]
+    user = (ctx.get("authorizer") or {}).get("claims", {}).get("sub") or (ctx.get("identity") or {}).get("sourceIp")
     return {
         "statusCode": 200,
         "headers": {"content-type": "application/json"},
@@ -251,7 +194,7 @@ const incoming: Group = {
             "resource": event["resource"],
             "pathParameters": event.get("pathParameters"),
             "query": event.get("queryStringParameters"),
-            "trace": event["headers"].get("x-trace"),
+            "trace": (event.get("headers") or {}).get("x-trace"),
             "stage": ctx["stage"],
             "user": user,
             "raw": raw,
@@ -270,7 +213,7 @@ const incoming: Group = {
     statusCode: 200,
     cookies: ['seen=1; HttpOnly'],
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ method, routeKey, rawPath, rawQueryString, pathParameters, queryStringParameters, cookies, sourceIp, agent: headers['user-agent'], raw }),
+    body: JSON.stringify({ method, routeKey, rawPath, rawQueryString, pathParameters, queryStringParameters, cookies, sourceIp, agent: headers?.['user-agent'], raw }),
   };
 };`,
       py: `def handler(event, context):
@@ -282,14 +225,14 @@ const incoming: Group = {
         "headers": {"content-type": "application/json"},
         "body": json.dumps({
             "method": http["method"],
-            "routeKey": event["routeKey"],
+            "routeKey": event.get("routeKey"),
             "rawPath": event["rawPath"],
             "rawQueryString": event["rawQueryString"],
             "pathParameters": event.get("pathParameters"),
             "query": event.get("queryStringParameters"),
             "cookies": event.get("cookies"),
             "sourceIp": http["sourceIp"],
-            "agent": event["headers"].get("user-agent"),
+            "agent": (event.get("headers") or {}).get("user-agent"),
             "raw": raw,
         }),
     }`,
@@ -297,30 +240,39 @@ const incoming: Group = {
     {
       id: 'in-alb',
       title: 'Application Load Balancer target',
-      note: 'ALB does not multi-value-decode unless enabled, and the response must carry statusDescription.',
+      note: 'ALB leaves query parameters URL-encoded. Multivalue target groups supply multiValueHeaders/multiValueQueryStringParameters and require multiValueHeaders in the response. Use the HTTP router on the Gadgets page for routing and decoding.',
       js: `export const handler = async (event) => {
-  const { httpMethod, path, queryStringParameters, headers, body, isBase64Encoded, requestContext } = event;
+  const { httpMethod, path, body, isBase64Encoded, requestContext } = event;
+  const multi = Object.hasOwn(event, 'multiValueHeaders');
+  const headers = multi ? event.multiValueHeaders : event.headers;
+  const query = multi ? event.multiValueQueryStringParameters : event.queryStringParameters;
   const raw = isBase64Encoded ? Buffer.from(body, 'base64').toString() : body;
   return {
     statusCode: 200,
     statusDescription: '200 OK',
     isBase64Encoded: false,
-    headers: { 'content-type': 'application/json', 'set-cookie': 'seen=1' },
-    body: JSON.stringify({ httpMethod, path, queryStringParameters, host: headers.host, targetGroup: requestContext.elb.targetGroupArn, raw }),
+    ...(multi
+      ? { multiValueHeaders: { 'content-type': ['application/json'], 'set-cookie': ['seen=1'] } }
+      : { headers: { 'content-type': 'application/json', 'set-cookie': 'seen=1' } }),
+    body: JSON.stringify({ httpMethod, path, query, host: headers?.host, targetGroup: requestContext.elb.targetGroupArn, raw }),
   };
 };`,
       py: `def handler(event, context):
+    multi = "multiValueHeaders" in event
+    headers = (event.get("multiValueHeaders") if multi else event.get("headers")) or {}
+    query = event.get("multiValueQueryStringParameters") if multi else event.get("queryStringParameters")
     raw = base64.b64decode(event["body"]).decode() if event.get("isBase64Encoded") else event.get("body")
     return {
         "statusCode": 200,
         "statusDescription": "200 OK",
         "isBase64Encoded": False,
-        "headers": {"content-type": "application/json", "set-cookie": "seen=1"},
+        **({"multiValueHeaders": {"content-type": ["application/json"], "set-cookie": ["seen=1"]}}
+           if multi else {"headers": {"content-type": "application/json", "set-cookie": "seen=1"}}),
         "body": json.dumps({
             "httpMethod": event["httpMethod"],
             "path": event["path"],
-            "query": event.get("queryStringParameters"),
-            "host": event["headers"].get("host"),
+            "query": query,
+            "host": headers.get("host"),
             "targetGroup": event["requestContext"]["elb"]["targetGroupArn"],
             "raw": raw,
         }),
@@ -668,12 +620,14 @@ const outgoing: Group = {
     {
       id: 'out-alb',
       title: 'ALB response',
-      note: 'statusDescription is mandatory for ALB targets.',
-      js: `export const handler = async () => ({
+      note: 'Match the target group format: use multiValueHeaders when enabled, headers otherwise. Include a statusDescription matching the status code.',
+      js: `export const handler = async (event) => ({
   statusCode: 200,
   statusDescription: '200 OK',
   isBase64Encoded: false,
-  headers: { 'content-type': 'text/html' },
+  ...(Object.hasOwn(event, 'multiValueHeaders')
+    ? { multiValueHeaders: { 'content-type': ['text/html'] } }
+    : { headers: { 'content-type': 'text/html' } }),
   body: '<h1>ok</h1>',
 });`,
       py: `def handler(event, context):
@@ -681,7 +635,8 @@ const outgoing: Group = {
         "statusCode": 200,
         "statusDescription": "200 OK",
         "isBase64Encoded": False,
-        "headers": {"content-type": "text/html"},
+        **({"multiValueHeaders": {"content-type": ["text/html"]}}
+           if "multiValueHeaders" in event else {"headers": {"content-type": "text/html"}}),
         "body": "<h1>ok</h1>",
     }`,
     },
@@ -804,6 +759,41 @@ sfn.send_task_failure(taskToken=event["taskToken"], error="Nope", cause="validat
 const out = JSON.parse(Buffer.from(res.Payload).toString());`,
       py: `res = lam.invoke(FunctionName="worker", InvocationType="RequestResponse", Payload=json.dumps({"hi": 1}))
 out = json.loads(res["Payload"].read())`,
+    },
+    {
+      id: 'out-submit-batch',
+      title: 'Submit an AWS Batch job',
+      note: 'Set BATCH_JOB_QUEUE and BATCH_JOB_DEFINITION (name:revision or ARN) for an existing queue and job definition. The Lambda execution role needs batch:SubmitJob on both the queue ARN and job-definition revision ARN. Returns a job ID once accepted; the job runs asynchronously. Container overrides below target a single-container ECS/EC2 or Fargate job definition using containerProperties. Repeated submissions can create duplicate jobs, even with the same jobName.',
+      js: `const submitted = await batchClient.send(new SubmitJobCommand({
+  jobName: 'process-input-' + Date.now(),
+  jobQueue: process.env.BATCH_JOB_QUEUE,
+  jobDefinition: process.env.BATCH_JOB_DEFINITION,
+  containerOverrides: {
+    command: ['python', 'worker.py', '--input', 's3://my-bucket/input.json'],
+    environment: [{ name: 'OUTPUT_BUCKET', value: 'my-output-bucket' }],
+  },
+  retryStrategy: { attempts: 2 },
+  timeout: { attemptDurationSeconds: 3600 },
+  // Optional array job (2–10,000 children); worker reads AWS_BATCH_JOB_ARRAY_INDEX.
+  // arrayProperties: { size: 10 },
+  // Optional dependency: dependsOn: [{ jobId: 'previous-job-id' }],
+}));
+console.log('Batch job submitted', { jobId: submitted.jobId, jobArn: submitted.jobArn });`,
+      py: `submitted = batch_client.submit_job(
+    jobName="process-input-" + str(time.time_ns()),
+    jobQueue=os.environ["BATCH_JOB_QUEUE"],
+    jobDefinition=os.environ["BATCH_JOB_DEFINITION"],
+    containerOverrides={
+        "command": ["python", "worker.py", "--input", "s3://my-bucket/input.json"],
+        "environment": [{"name": "OUTPUT_BUCKET", "value": "my-output-bucket"}],
+    },
+    retryStrategy={"attempts": 2},
+    timeout={"attemptDurationSeconds": 3600},
+    # Optional array job (2–10,000 children); worker reads AWS_BATCH_JOB_ARRAY_INDEX.
+    # arrayProperties={"size": 10},
+    # Optional dependency: dependsOn=[{"jobId": "previous-job-id"}],
+)
+print("Batch job submitted", submitted["jobId"], submitted.get("jobArn"))`,
     },
     {
       id: 'out-websocket',
@@ -1564,15 +1554,61 @@ for m in recv.get("Messages", []):
     },
     {
       id: 'svc-secrets',
-      title: 'Secrets Manager',
-      note: 'SecretString is usually a JSON blob you parse. Binary secrets arrive under SecretBinary instead.',
-      js: `const res = await secrets.send(new GetSecretValueCommand({
-  SecretId: 'prod/db',
-  VersionStage: 'AWSCURRENT',
-}));
-const secret = JSON.parse(res.SecretString);`,
-      py: `res = secrets.get_secret_value(SecretId="prod/db", VersionStage="AWSCURRENT")
-secret = json.loads(res["SecretString"])`,
+      title: 'Secrets Manager · getSecret(name or ARN)',
+      js: `import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
+
+const secrets = new SecretsManagerClient({});
+
+async function getSecret(id) {
+  const res = await secrets.send(new GetSecretValueCommand({ SecretId: id }));
+  if (res.SecretString !== undefined) return res.SecretString;
+  if (res.SecretBinary !== undefined) return Buffer.from(res.SecretBinary);
+  throw new Error('Secret has no value');
+}
+
+const value = await getSecret('prod/api-key');
+const credentials = JSON.parse(await getSecret('prod/db'));`,
+      py: `import boto3
+import json
+
+secrets = boto3.client("secretsmanager")
+
+def getSecret(id):
+    res = secrets.get_secret_value(SecretId=id)
+    if "SecretString" in res:
+        return res["SecretString"]
+    if "SecretBinary" in res:
+        return res["SecretBinary"]
+    raise ValueError("Secret has no value")
+
+value = getSecret("prod/api-key")
+credentials = json.loads(getSecret("prod/db"))`,
+    },
+    {
+      id: 'svc-ssm-reader',
+      title: 'SSM Parameter Store · getParam(name or ARN)',
+      js: `import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+
+const ssm = new SSMClient({});
+
+async function getParam(id) {
+  const res = await ssm.send(new GetParameterCommand({ Name: id, WithDecryption: true }));
+  if (res.Parameter?.Value !== undefined) return res.Parameter.Value;
+  throw new Error('Parameter has no value');
+}
+
+const value = await getParam('/app/db/url');
+const config = JSON.parse(await getParam('/app/config'));`,
+      py: `import boto3
+import json
+
+ssm = boto3.client("ssm")
+
+def getParam(id):
+    return ssm.get_parameter(Name=id, WithDecryption=True)["Parameter"]["Value"]
+
+value = getParam("/app/db/url")
+config = json.loads(getParam("/app/config"))`,
     },
     {
       id: 'svc-ssm',
@@ -1907,6 +1943,6 @@ idp.admin_set_user_password(UserPoolId=pool, Username="ann@x.ch", Password="S3cr
   ],
 };
 
-export const groups: Group[] = [common, incoming, outgoing, databases, services];
+export const groups: Group[] = [common, incoming, outgoing, databases, services, drivers];
 
 export default groups;

@@ -1,0 +1,14 @@
+{
+  "Variables": {
+    "REDSHIFT_DATABASE": "dev",
+    "REDSHIFT_WORKGROUP": "my-workgroup",
+    "REDSHIFT_CLUSTER": "",
+    "REDSHIFT_SECRET_ARN": "arn:aws:secretsmanager:eu-central-1:111122223333:secret:redshift-xxxxxx",
+    "ATHENA_WORKGROUP": "primary",
+    "ATHENA_DATABASE": "default",
+    "ATHENA_OUTPUT": "s3://my-analytics-bucket/athena-results/",
+    "OPENSEARCH_URL": "https://search-my-domain.eu-central-1.es.amazonaws.com",
+    "OPENSEARCH_SERVERLESS_URL": "https://my-collection.eu-central-1.aoss.amazonaws.com",
+    "OPENSEARCH_INDEX": "sales"
+  }
+}

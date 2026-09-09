@@ -1,0 +1,71 @@
+#cloud-config
+package_update: true
+packages:
+- docker
+- awscli-2
+ssh_pwauth: false
+disable_root: true
+write_files:
+- path: /etc/container.env
+  owner: root:root
+  permissions: '0600'
+  defer: true
+  content: |
+    REGION=eu-central-1
+    REGISTRY=111122223333.dkr.ecr.eu-central-1.amazonaws.com
+    IMAGE=111122223333.dkr.ecr.eu-central-1.amazonaws.com/my-app:v1
+- path: /usr/local/sbin/pull-app
+  owner: root:root
+  permissions: '0700'
+  defer: true
+  content: |
+    #!/bin/bash
+    set -euo pipefail
+    source /etc/container.env
+    export AWS_PAGER="" AWS_RETRY_MODE=standard AWS_MAX_ATTEMPTS=10
+    [[ "$IMAGE" == "$REGISTRY/"* ]]
+    export DOCKER_CONFIG
+    DOCKER_CONFIG=$(mktemp -d /run/ecr-login.XXXXXX)
+    trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+    aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$REGISTRY"
+    docker pull "$IMAGE"
+- path: /etc/systemd/system/app.service
+  owner: root:root
+  permissions: '0644'
+  defer: true
+  content: |
+    [Unit]
+    Description=ECR application container
+    Wants=network-online.target
+    Requires=docker.service
+    After=network-online.target docker.service
+    StartLimitIntervalSec=0
+
+    [Service]
+    EnvironmentFile=/etc/container.env
+    ExecStartPre=/usr/local/sbin/pull-app
+    ExecStartPre=-/usr/bin/docker rm -f app
+    ExecStart=/usr/bin/docker run --rm --name app --init --user 10001:10001 --read-only --cap-drop=ALL --security-opt=no-new-privileges --tmpfs /tmp:rw,noexec,nosuid,size=64m --memory=512m --cpus=1 --pids-limit=256 --log-opt max-size=10m --log-opt max-file=3 --publish 8080:8080 ${IMAGE}
+    ExecStop=/usr/bin/docker stop --time 30 app
+    Restart=on-failure
+    RestartSec=10
+    TimeoutStartSec=600
+    TimeoutStopSec=45
+
+    [Install]
+    WantedBy=multi-user.target
+runcmd:
+- - systemctl
+  - enable
+  - --now
+  - docker
+- - systemctl
+  - daemon-reload
+- - systemctl
+  - enable
+  - --now
+  - app.service
+- - systemctl
+  - is-active
+  - --quiet
+  - app.service

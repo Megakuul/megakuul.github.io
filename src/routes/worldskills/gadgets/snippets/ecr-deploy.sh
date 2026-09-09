@@ -1,4 +1,4 @@
-zip ecr-gadget.zip ecr-index.mjs ecr-manager.mjs
+zip ecr-gadget.zip ecr-index.mjs ecr-manager.mjs local-logs.mjs
 
 aws codebuild create-project \
   --cli-input-json file://ecr-codebuild-project.json
@@ -6,6 +6,8 @@ aws codebuild create-project \
 aws lambda update-function-code \
   --function-name ecr-gadget \
   --zip-file fileb://ecr-gadget.zip
+
+aws lambda wait function-updated --function-name ecr-gadget
 
 aws lambda update-function-configuration \
   --function-name ecr-gadget \

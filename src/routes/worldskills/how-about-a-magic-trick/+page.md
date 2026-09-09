@@ -3,11 +3,16 @@
     import Note from "../Note.svelte";
 </script>
 
-## Table of Contents
-
 ![magictrick](/images/magictrick.gif)
 
 ## Tricks
+
+### SSH Keepalive
+
+Needs no introduction.
+```bash
+ssh -o "ServerAliveInterval 30" -i yourkey.pem ec2-user@
+```
 
 ### Abuse the aws cli as json api wrapper 📡
 

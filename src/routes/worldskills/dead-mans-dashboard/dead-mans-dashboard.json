@@ -1,0 +1,429 @@
+{
+  "start": "-PT1H",
+  "periodOverride": "inherit",
+  "widgets": [
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 0,
+      "width": 24,
+      "height": 16,
+      "properties": {
+        "title": "Pipeline",
+        "region": "eu-central-1",
+        "view": "timeSeries",
+        "stacked": false,
+        "period": 60,
+        "stat": "Sum",
+        "liveData": false,
+        "metrics": [
+          [
+            {
+              "id": "e1",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/ApiGateway,ApiId,Stage} (MetricName=\"Count\" OR MetricName=\"4xx\" OR MetricName=\"5xx\" OR MetricName=\"ConnectCount\" OR MetricName=\"MessageCount\" OR MetricName=\"IntegrationError\" OR MetricName=\"ClientError\" OR MetricName=\"ExecutionError\") NOT \"Route\" NOT \"Method\" NOT \"Resource\" DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "API HTTP / WebSocket",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e2",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/ApiGateway,ApiName,Stage} (MetricName=\"4XXError\" OR MetricName=\"5XXError\") NOT \"Method\" NOT \"Resource\" DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "API REST",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e3",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/ApiGateway,ApiName,Stage} (MetricName=\"Count\") NOT \"Method\" NOT \"Resource\" DMD_METRIC_SCOPE', 'SampleCount', 60))",
+              "label": "API REST",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e4",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/ApplicationELB,LoadBalancer} (MetricName=\"RequestCount\" OR MetricName=\"HTTPCode_Target_2XX_Count\" OR MetricName=\"HTTPCode_Target_3XX_Count\" OR MetricName=\"HTTPCode_Target_4XX_Count\" OR MetricName=\"HTTPCode_Target_5XX_Count\" OR MetricName=\"HTTPCode_ELB_3XX_Count\" OR MetricName=\"HTTPCode_ELB_4XX_Count\" OR MetricName=\"HTTPCode_ELB_5XX_Count\" OR MetricName=\"HTTPCode_ELB_500_Count\" OR MetricName=\"HTTPCode_ELB_502_Count\" OR MetricName=\"HTTPCode_ELB_503_Count\" OR MetricName=\"HTTPCode_ELB_504_Count\" OR MetricName=\"TargetConnectionErrorCount\" OR MetricName=\"ClientTLSNegotiationErrorCount\" OR MetricName=\"TargetTLSNegotiationErrorCount\" OR MetricName=\"RejectedConnectionCount\") NOT \"AvailabilityZone\" NOT \"TargetGroup\" DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "ALB",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e5",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/ApplicationELB,LoadBalancer,TargetGroup} (MetricName=\"UnHealthyHostCount\") NOT \"AvailabilityZone\" DMD_METRIC_SCOPE', 'Maximum', 60))",
+              "label": "ALB",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e6",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/ApplicationELB,LoadBalancer,TargetGroup} (MetricName=\"HealthyHostCount\") NOT \"AvailabilityZone\" DMD_METRIC_SCOPE', 'Minimum', 60))",
+              "label": "ALB",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e7",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/NetworkELB,LoadBalancer} (MetricName=\"NewFlowCount\" OR MetricName=\"TCP_Client_Reset_Count\" OR MetricName=\"TCP_ELB_Reset_Count\" OR MetricName=\"TCP_Target_Reset_Count\" OR MetricName=\"ClientTLSNegotiationErrorCount\" OR MetricName=\"TargetTLSNegotiationErrorCount\") NOT \"AvailabilityZone\" NOT \"TargetGroup\" DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "NLB",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e8",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/NetworkELB,LoadBalancer,TargetGroup} (MetricName=\"UnHealthyHostCount\") NOT \"AvailabilityZone\" DMD_METRIC_SCOPE', 'Maximum', 60))",
+              "label": "NLB",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e9",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/NetworkELB,LoadBalancer,TargetGroup} (MetricName=\"HealthyHostCount\") NOT \"AvailabilityZone\" DMD_METRIC_SCOPE', 'Minimum', 60))",
+              "label": "NLB",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e10",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/CloudFront,DistributionId,Region} (MetricName=\"Requests\") Region=\"Global\" DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "CloudFront",
+              "region": "us-east-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e11",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/CloudFront,DistributionId,Region} (MetricName=\"TotalErrorRate\" OR MetricName=\"4xxErrorRate\" OR MetricName=\"5xxErrorRate\" OR MetricName=\"401ErrorRate\" OR MetricName=\"403ErrorRate\" OR MetricName=\"404ErrorRate\" OR MetricName=\"502ErrorRate\" OR MetricName=\"503ErrorRate\" OR MetricName=\"504ErrorRate\") Region=\"Global\" DMD_METRIC_SCOPE', 'Average', 60))",
+              "label": "CloudFront",
+              "region": "us-east-1",
+              "yAxis": "right"
+            }
+          ],
+          [
+            {
+              "id": "e12",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/VpcLattice,Service} (MetricName=\"TotalRequestCount\" OR MetricName=\"HTTPCode_2XX_Count\" OR MetricName=\"HTTPCode_3XX_Count\" OR MetricName=\"HTTPCode_4XX_Count\" OR MetricName=\"HTTPCode_5XX_Count\" OR MetricName=\"RequestTimeoutCount\") DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "Lattice",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e13",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/SQS,QueueName} (MetricName=\"NumberOfMessagesSent\" OR MetricName=\"NumberOfMessagesReceived\" OR MetricName=\"NumberOfMessagesDeleted\") DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "SQS",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e14",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/SQS,QueueName} (MetricName=\"ApproximateNumberOfMessagesVisible\" OR MetricName=\"ApproximateNumberOfMessagesNotVisible\" OR MetricName=\"ApproximateNumberOfMessagesDelayed\") DMD_METRIC_SCOPE', 'Maximum', 60))",
+              "label": "SQS / DLQ",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e15",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/SNS,TopicName} (MetricName=\"NumberOfMessagesPublished\" OR MetricName=\"NumberOfNotificationsDelivered\" OR MetricName=\"NumberOfNotificationsFailed\" OR MetricName=\"NumberOfNotificationsFilteredOut\" OR MetricName=\"NumberOfNotificationsFilteredOut-InvalidAttributes\" OR MetricName=\"NumberOfNotificationsFilteredOut-InvalidMessageBody\" OR MetricName=\"NumberOfNotificationsRedrivenToDlq\" OR MetricName=\"NumberOfNotificationsFailedToRedriveToDlq\") DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "SNS",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e16",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/Events,RuleName} (MetricName=\"MatchedEvents\" OR MetricName=\"InvocationAttempts\" OR MetricName=\"SuccessfulInvocationAttempts\" OR MetricName=\"RetryInvocationAttempts\" OR MetricName=\"FailedInvocations\" OR MetricName=\"ThrottledRules\" OR MetricName=\"InvocationsSentToDlq\" OR MetricName=\"InvocationsFailedToBeSentToDlq\") DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "EventBridge rule",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e17",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/Events,EventBusName} (MetricName=\"MatchedEvents\" OR MetricName=\"InvocationAttempts\" OR MetricName=\"SuccessfulInvocationAttempts\" OR MetricName=\"RetryInvocationAttempts\") NOT \"RuleName\" DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "EventBridge bus",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e18",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/EventBridge/Pipes,PipeName} (MetricName=\"EventCount\" OR MetricName=\"Invocations\" OR MetricName=\"ExecutionFailed\" OR MetricName=\"ExecutionPartiallyFailed\" OR MetricName=\"ExecutionThrottled\" OR MetricName=\"ExecutionTimeout\" OR MetricName=\"EnrichmentStageFailed\" OR MetricName=\"TargetStageFailed\" OR MetricName=\"TargetStagePartiallyFailed\" OR MetricName=\"TargetStageSkipped\") DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "Pipes",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e19",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/Scheduler,ScheduleGroup} (MetricName=\"InvocationAttemptCount\" OR MetricName=\"TargetErrorCount\" OR MetricName=\"TargetErrorThrottledCount\" OR MetricName=\"InvocationThrottleCount\" OR MetricName=\"InvocationDroppedCount\" OR MetricName=\"InvocationsSentToDeadLetterCount\" OR MetricName=\"InvocationsFailedToBeSentToDeadLetterCount\") DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "Scheduler",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e20",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/Lambda,FunctionName} (MetricName=\"Invocations\" OR MetricName=\"Errors\" OR MetricName=\"Throttles\" OR MetricName=\"AsyncEventsReceived\" OR MetricName=\"AsyncEventsDropped\" OR MetricName=\"DeadLetterErrors\" OR MetricName=\"DestinationDeliveryFailures\") NOT \"Resource\" NOT \"EventSourceMappingUUID\" DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "Lambda",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e21",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/Lambda,FunctionName} (MetricName=\"ConcurrentExecutions\") NOT \"Resource\" DMD_METRIC_SCOPE', 'Maximum', 60))",
+              "label": "Lambda",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e22",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/States,StateMachineArn} (MetricName=\"ExecutionsStarted\" OR MetricName=\"ExecutionsSucceeded\" OR MetricName=\"ExecutionsFailed\" OR MetricName=\"ExecutionsTimedOut\" OR MetricName=\"ExecutionsAborted\" OR MetricName=\"ExecutionThrottled\") DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "Step Functions",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e23",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/Kinesis,StreamName} (MetricName=\"IncomingRecords\" OR MetricName=\"GetRecords.Records\" OR MetricName=\"ReadProvisionedThroughputExceeded\" OR MetricName=\"WriteProvisionedThroughputExceeded\") NOT \"ShardId\" NOT \"ConsumerName\" DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "Kinesis",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e24",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/Firehose,DeliveryStreamName} (MetricName=\"IncomingRecords\" OR MetricName=\"ThrottledRecords\" OR MetricName=\"DeliveryToS3.Records\" OR MetricName=\"DeliveryToRedshift.Records\" OR MetricName=\"DeliveryToAmazonOpenSearchService.Records\" OR MetricName=\"DeliveryToAmazonOpenSearchServerless.Records\" OR MetricName=\"DeliveryToHttpEndpoint.Records\") DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "Firehose",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e25",
+              "expression": "REMOVE_EMPTY(SEARCH('{ECS/ContainerInsights,ClusterName,ServiceName} (MetricName=\"PendingTaskCount\" OR MetricName=\"DesiredTaskCount\") DMD_METRIC_SCOPE', 'Maximum', 60))",
+              "label": "ECS",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e26",
+              "expression": "REMOVE_EMPTY(SEARCH('{ECS/ContainerInsights,ClusterName,ServiceName} (MetricName=\"RunningTaskCount\") DMD_METRIC_SCOPE', 'Minimum', 60))",
+              "label": "ECS",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e27",
+              "expression": "REMOVE_EMPTY(SEARCH('{ECS/ContainerInsights,ClusterName} (MetricName=\"TaskCount\") NOT \"ServiceName\" NOT \"TaskDefinitionFamily\" DMD_METRIC_SCOPE', 'Maximum', 60))",
+              "label": "ECS / Batch",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e28",
+              "expression": "REMOVE_EMPTY(SEARCH('{ContainerInsights,ClusterName} (MetricName=\"cluster_failed_node_count\") DMD_METRIC_SCOPE', 'Maximum', 60))",
+              "label": "EKS",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e29",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/AutoScaling,AutoScalingGroupName} (MetricName=\"GroupDesiredCapacity\" OR MetricName=\"GroupPendingInstances\") DMD_METRIC_SCOPE', 'Maximum', 60))",
+              "label": "ASG",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e30",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/AutoScaling,AutoScalingGroupName} (MetricName=\"GroupInServiceInstances\") DMD_METRIC_SCOPE', 'Minimum', 60))",
+              "label": "ASG",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e31",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/EC2,InstanceId} (MetricName=\"StatusCheckFailed\" OR MetricName=\"StatusCheckFailed_Instance\" OR MetricName=\"StatusCheckFailed_System\" OR MetricName=\"StatusCheckFailed_AttachedEBS\") DMD_METRIC_SCOPE', 'Maximum', 60))",
+              "label": "EC2",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e32",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/RDS,DBInstanceIdentifier} (MetricName=\"DatabaseConnections\") DMD_METRIC_SCOPE', 'Maximum', 60))",
+              "label": "RDS",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e33",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/DynamoDB,TableName} (MetricName=\"ConsumedReadCapacityUnits\" OR MetricName=\"ConsumedWriteCapacityUnits\" OR MetricName=\"ReadThrottleEvents\" OR MetricName=\"WriteThrottleEvents\" OR MetricName=\"SystemErrors\" OR MetricName=\"ThrottledRequests\" OR MetricName=\"TransactionConflict\") NOT \"GlobalSecondaryIndexName\" DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "DynamoDB",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e34",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/DynamoDB} (MetricName=\"UserErrors\") DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "DynamoDB account",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e35",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/ElastiCache,CacheClusterId,CacheNodeId} (MetricName=\"CurrConnections\") DMD_METRIC_SCOPE', 'Maximum', 60))",
+              "label": "ElastiCache",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e36",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/ElastiCache,CacheClusterId,CacheNodeId} (MetricName=\"Evictions\") DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "ElastiCache",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e37",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/ES,ClientId,DomainName} (MetricName=\"2xx\" OR MetricName=\"3xx\" OR MetricName=\"4xx\" OR MetricName=\"5xx\" OR MetricName=\"OpenSearchRequests\" OR MetricName=\"InvalidHostHeaderRequests\" OR MetricName=\"TLSNegotiationError\") NOT \"NodeId\" DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "OpenSearch",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e38",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/ES,ClientId,DomainName} (MetricName=\"ClusterStatus.red\" OR MetricName=\"ClusterStatus.yellow\" OR MetricName=\"ClusterIndexWritesBlocked\") NOT \"NodeId\" DMD_METRIC_SCOPE', 'Maximum', 60))",
+              "label": "OpenSearch",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e39",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/S3,BucketName,FilterId} (MetricName=\"AllRequests\" OR MetricName=\"GetRequests\" OR MetricName=\"PutRequests\" OR MetricName=\"4xxErrors\" OR MetricName=\"5xxErrors\") DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "S3",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e40",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/WAFV2,WebACL,Region,Rule} (MetricName=\"AllowedRequests\" OR MetricName=\"BlockedRequests\" OR MetricName=\"CountedRequests\") Rule=\"ALL\" DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "WAF",
+              "region": "eu-central-1",
+              "yAxis": "left"
+            }
+          ],
+          [
+            {
+              "id": "e41",
+              "expression": "REMOVE_EMPTY(SEARCH('{AWS/WAFV2,WebACL,Rule} (MetricName=\"AllowedRequests\" OR MetricName=\"BlockedRequests\" OR MetricName=\"CountedRequests\") Rule=\"ALL\" NOT \"Region\" DMD_METRIC_SCOPE', 'Sum', 60))",
+              "label": "CloudFront WAF",
+              "region": "us-east-1",
+              "yAxis": "left"
+            }
+          ]
+        ],
+        "legend": {
+          "position": "right"
+        },
+        "yAxis": {
+          "left": {
+            "min": 0,
+            "label": "Count",
+            "showUnits": false
+          },
+          "right": {
+            "min": 0,
+            "max": 100,
+            "label": "Error %",
+            "showUnits": false
+          }
+        }
+      }
+    }
+  ],
+  "variables": [
+    {
+      "type": "pattern",
+      "pattern": "eu-central-1",
+      "inputType": "input",
+      "id": "region",
+      "label": "Region",
+      "defaultValue": "eu-central-1",
+      "visible": true
+    },
+    {
+      "type": "pattern",
+      "pattern": "DMD_METRIC_SCOPE",
+      "inputType": "input",
+      "id": "scope",
+      "label": "Resource filter",
+      "defaultValue": "",
+      "visible": true
+    }
+  ]
+}

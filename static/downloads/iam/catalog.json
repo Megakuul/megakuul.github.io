@@ -1,0 +1,2586 @@
+{
+  "roles": [
+    {
+      "id": "lambda",
+      "title": "Lambda \u00b7 VPC + CloudWatch Logs",
+      "trust": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "lambda.amazonaws.com"
+            },
+            "Action": [
+              "sts:AssumeRole"
+            ]
+          }
+        ]
+      },
+      "managedPolicies": [
+        "arn:${PARTITION}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+      ],
+      "source": null,
+      "inputs": [],
+      "instanceProfile": false
+    },
+    {
+      "id": "lambda-basic",
+      "title": "Lambda \u00b7 CloudWatch Logs",
+      "trust": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "lambda.amazonaws.com"
+            },
+            "Action": [
+              "sts:AssumeRole"
+            ]
+          }
+        ]
+      },
+      "managedPolicies": [
+        "arn:${PARTITION}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      ],
+      "source": null,
+      "inputs": [],
+      "instanceProfile": false
+    },
+    {
+      "id": "step-functions",
+      "title": "Step Functions \u00b7 execution role",
+      "trust": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "states.amazonaws.com"
+            },
+            "Action": [
+              "sts:AssumeRole"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "aws:SourceAccount": "${ACCOUNT_ID}"
+              },
+              "ArnLike": {
+                "aws:SourceArn": "${SOURCE_ARN}"
+              }
+            }
+          }
+        ]
+      },
+      "managedPolicies": [],
+      "source": "arn:${PARTITION}:states:${REGION}:${ACCOUNT_ID}:stateMachine:*",
+      "inputs": [],
+      "instanceProfile": false
+    },
+    {
+      "id": "ecs-execution",
+      "title": "ECS / Fargate \u00b7 execution \u00b7 ECR + logs",
+      "trust": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "ecs-tasks.amazonaws.com"
+            },
+            "Action": [
+              "sts:AssumeRole"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "aws:SourceAccount": "${ACCOUNT_ID}"
+              },
+              "ArnLike": {
+                "aws:SourceArn": "${SOURCE_ARN}"
+              }
+            }
+          }
+        ]
+      },
+      "managedPolicies": [
+        "arn:${PARTITION}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+      ],
+      "source": "arn:${PARTITION}:ecs:${REGION}:${ACCOUNT_ID}:*",
+      "inputs": [],
+      "instanceProfile": false
+    },
+    {
+      "id": "ecs-task",
+      "title": "ECS / Fargate \u00b7 application task",
+      "trust": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "ecs-tasks.amazonaws.com"
+            },
+            "Action": [
+              "sts:AssumeRole"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "aws:SourceAccount": "${ACCOUNT_ID}"
+              },
+              "ArnLike": {
+                "aws:SourceArn": "${SOURCE_ARN}"
+              }
+            }
+          }
+        ]
+      },
+      "managedPolicies": [],
+      "source": "arn:${PARTITION}:ecs:${REGION}:${ACCOUNT_ID}:*",
+      "inputs": [],
+      "instanceProfile": false
+    },
+    {
+      "id": "ecs-instance",
+      "title": "ECS \u00b7 EC2 container instance + SSM",
+      "trust": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "ec2.amazonaws.com"
+            },
+            "Action": [
+              "sts:AssumeRole"
+            ]
+          }
+        ]
+      },
+      "managedPolicies": [
+        "arn:${PARTITION}:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role",
+        "arn:${PARTITION}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      ],
+      "source": null,
+      "inputs": [],
+      "instanceProfile": true
+    },
+    {
+      "id": "batch-job",
+      "title": "Batch \u00b7 application job",
+      "trust": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "ecs-tasks.amazonaws.com"
+            },
+            "Action": [
+              "sts:AssumeRole"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "aws:SourceAccount": "${ACCOUNT_ID}"
+              },
+              "ArnLike": {
+                "aws:SourceArn": "${SOURCE_ARN}"
+              }
+            }
+          }
+        ]
+      },
+      "managedPolicies": [],
+      "source": "arn:${PARTITION}:ecs:${REGION}:${ACCOUNT_ID}:*",
+      "inputs": [],
+      "instanceProfile": false
+    },
+    {
+      "id": "eks-cluster",
+      "title": "EKS \u00b7 cluster",
+      "trust": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "eks.amazonaws.com"
+            },
+            "Action": [
+              "sts:AssumeRole"
+            ]
+          }
+        ]
+      },
+      "managedPolicies": [
+        "arn:${PARTITION}:iam::aws:policy/AmazonEKSClusterPolicy"
+      ],
+      "source": null,
+      "inputs": [],
+      "instanceProfile": false
+    },
+    {
+      "id": "eks-node",
+      "title": "EKS \u00b7 EC2 node + instance profile",
+      "trust": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "ec2.amazonaws.com"
+            },
+            "Action": [
+              "sts:AssumeRole"
+            ]
+          }
+        ]
+      },
+      "managedPolicies": [
+        "arn:${PARTITION}:iam::aws:policy/AmazonEKSWorkerNodePolicy",
+        "arn:${PARTITION}:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly"
+      ],
+      "source": null,
+      "inputs": [],
+      "instanceProfile": true
+    },
+    {
+      "id": "eks-fargate",
+      "title": "EKS \u00b7 Fargate pod execution",
+      "trust": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "eks-fargate-pods.amazonaws.com"
+            },
+            "Action": [
+              "sts:AssumeRole"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "aws:SourceAccount": "${ACCOUNT_ID}"
+              },
+              "ArnLike": {
+                "aws:SourceArn": "${SOURCE_ARN}"
+              }
+            }
+          }
+        ]
+      },
+      "managedPolicies": [
+        "arn:${PARTITION}:iam::aws:policy/AmazonEKSFargatePodExecutionRolePolicy"
+      ],
+      "source": "arn:${PARTITION}:eks:${REGION}:${ACCOUNT_ID}:fargateprofile/${CLUSTER_NAME}/*",
+      "inputs": [
+        {
+          "env": "CLUSTER_NAME",
+          "kind": "eks-name",
+          "label": "EKS cluster"
+        }
+      ],
+      "instanceProfile": false
+    },
+    {
+      "id": "eks-pod",
+      "title": "EKS \u00b7 Pod Identity \u00b7 application",
+      "trust": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "pods.eks.amazonaws.com"
+            },
+            "Action": [
+              "sts:AssumeRole",
+              "sts:TagSession"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestTag/eks-cluster-arn": "${CLUSTER_ARN}",
+                "aws:RequestTag/kubernetes-namespace": "${NAMESPACE}",
+                "aws:RequestTag/kubernetes-service-account": "${SERVICE_ACCOUNT}"
+              }
+            }
+          }
+        ]
+      },
+      "managedPolicies": [],
+      "source": null,
+      "inputs": [
+        {
+          "env": "CLUSTER_NAME",
+          "kind": "eks-name",
+          "label": "EKS cluster"
+        },
+        {
+          "env": "NAMESPACE",
+          "label": "Kubernetes namespace"
+        },
+        {
+          "env": "SERVICE_ACCOUNT",
+          "label": "Kubernetes service account"
+        }
+      ],
+      "instanceProfile": false
+    },
+    {
+      "id": "ec2",
+      "title": "EC2 \u00b7 SSM + instance profile",
+      "trust": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "ec2.amazonaws.com"
+            },
+            "Action": [
+              "sts:AssumeRole"
+            ]
+          }
+        ]
+      },
+      "managedPolicies": [
+        "arn:${PARTITION}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      ],
+      "source": null,
+      "inputs": [],
+      "instanceProfile": true
+    },
+    {
+      "id": "eventbridge",
+      "title": "EventBridge \u00b7 rule target",
+      "trust": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "events.amazonaws.com"
+            },
+            "Action": [
+              "sts:AssumeRole"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "aws:SourceAccount": "${ACCOUNT_ID}"
+              },
+              "ArnLike": {
+                "aws:SourceArn": "${SOURCE_ARN}"
+              }
+            }
+          }
+        ]
+      },
+      "managedPolicies": [],
+      "source": "arn:${PARTITION}:events:${REGION}:${ACCOUNT_ID}:rule/*",
+      "inputs": [],
+      "instanceProfile": false
+    },
+    {
+      "id": "scheduler",
+      "title": "EventBridge Scheduler \u00b7 target",
+      "trust": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "scheduler.amazonaws.com"
+            },
+            "Action": [
+              "sts:AssumeRole"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "aws:SourceAccount": "${ACCOUNT_ID}"
+              },
+              "ArnLike": {
+                "aws:SourceArn": "${SOURCE_ARN}"
+              }
+            }
+          }
+        ]
+      },
+      "managedPolicies": [],
+      "source": "arn:${PARTITION}:scheduler:${REGION}:${ACCOUNT_ID}:schedule-group/*",
+      "inputs": [],
+      "instanceProfile": false
+    },
+    {
+      "id": "flow-logs",
+      "title": "VPC Flow Logs \u00b7 execution role",
+      "trust": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "vpc-flow-logs.amazonaws.com"
+            },
+            "Action": [
+              "sts:AssumeRole"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "aws:SourceAccount": "${ACCOUNT_ID}"
+              },
+              "ArnLike": {
+                "aws:SourceArn": "${SOURCE_ARN}"
+              }
+            }
+          }
+        ]
+      },
+      "managedPolicies": [],
+      "source": "arn:${PARTITION}:ec2:${REGION}:${ACCOUNT_ID}:vpc-flow-log/*",
+      "inputs": [],
+      "instanceProfile": false
+    },
+    {
+      "id": "api-gateway",
+      "title": "API Gateway \u00b7 CloudWatch Logs",
+      "trust": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "apigateway.amazonaws.com"
+            },
+            "Action": [
+              "sts:AssumeRole"
+            ]
+          }
+        ]
+      },
+      "managedPolicies": [
+        "arn:${PARTITION}:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+      ],
+      "source": null,
+      "inputs": [],
+      "instanceProfile": false
+    }
+  ],
+  "policies": [
+    {
+      "id": "logs-write",
+      "title": "CloudWatch \u00b7 log group writer",
+      "group": "Observability",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "logs",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "logs:CreateLogStream",
+              "logs:PutLogEvents"
+            ],
+            "Resource": "${RESOURCE_ARN}:log-stream:*"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:logs:eu-central-1:111122223333:log-group:/app/my-app"
+      }
+    },
+    {
+      "id": "logs-stream",
+      "title": "CloudWatch \u00b7 one stream writer",
+      "group": "Observability",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "logs",
+          "label": "RESOURCE_ARN"
+        },
+        {
+          "env": "STREAM_NAME",
+          "label": "Exact log stream name"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "logs:PutLogEvents"
+            ],
+            "Resource": "${RESOURCE_ARN}:log-stream:${STREAM_NAME}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:logs:eu-central-1:111122223333:log-group:/app/my-app",
+        "STREAM_NAME": "my-stream"
+      }
+    },
+    {
+      "id": "flow-logs",
+      "title": "VPC Flow Logs \u00b7 existing log group",
+      "group": "Observability",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "logs",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "logs:CreateLogStream",
+              "logs:PutLogEvents"
+            ],
+            "Resource": "${RESOURCE_ARN}:log-stream:*"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "logs:DescribeLogStreams"
+            ],
+            "Resource": "${RESOURCE_ARN}:*"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "logs:DescribeLogGroups"
+            ],
+            "Resource": "*",
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestedRegion": "${REGION}"
+              }
+            }
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:logs:eu-central-1:111122223333:log-group:/app/my-app"
+      }
+    },
+    {
+      "id": "step-functions-logs",
+      "title": "Step Functions \u00b7 log delivery + chosen log group",
+      "group": "Observability",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "logs",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "logs:CreateLogStream",
+              "logs:PutLogEvents"
+            ],
+            "Resource": "${RESOURCE_ARN}:log-stream:*"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "logs:CreateLogDelivery",
+              "logs:GetLogDelivery",
+              "logs:UpdateLogDelivery",
+              "logs:DeleteLogDelivery",
+              "logs:ListLogDeliveries",
+              "logs:PutResourcePolicy",
+              "logs:DescribeResourcePolicies",
+              "logs:DescribeLogGroups"
+            ],
+            "Resource": "*",
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestedRegion": "${REGION}"
+              }
+            }
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:logs:eu-central-1:111122223333:log-group:/app/my-app"
+      }
+    },
+    {
+      "id": "metrics-write",
+      "title": "CloudWatch \u00b7 custom metric namespace",
+      "group": "Observability",
+      "inputs": [
+        {
+          "env": "METRIC_NAMESPACE",
+          "label": "Custom metric namespace"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "cloudwatch:PutMetricData"
+            ],
+            "Resource": "*",
+            "Condition": {
+              "StringEquals": {
+                "cloudwatch:namespace": "${METRIC_NAMESPACE}",
+                "aws:RequestedRegion": "${REGION}"
+              }
+            }
+          }
+        ]
+      },
+      "example": {
+        "METRIC_NAMESPACE": "MyApp/Pipeline"
+      }
+    },
+    {
+      "id": "xray-write",
+      "title": "X-Ray \u00b7 trace and telemetry writer",
+      "group": "Observability",
+      "inputs": [],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "xray:PutTraceSegments",
+              "xray:PutTelemetryRecords"
+            ],
+            "Resource": "*",
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestedRegion": "${REGION}"
+              }
+            }
+          }
+        ]
+      },
+      "example": {}
+    },
+    {
+      "id": "s3-read",
+      "title": "S3 \u00b7 prefix reader",
+      "group": "Storage",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "s3",
+          "label": "RESOURCE_ARN"
+        },
+        {
+          "env": "PREFIX",
+          "label": "S3 prefix (folder/; / for whole bucket)"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "s3:GetObject"
+            ],
+            "Resource": "${RESOURCE_ARN}/${PREFIX}*",
+            "Condition": {
+              "Bool": {
+                "aws:SecureTransport": "true"
+              }
+            }
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "s3:ListBucket"
+            ],
+            "Resource": "${RESOURCE_ARN}",
+            "Condition": {
+              "StringLike": {
+                "s3:prefix": [
+                  "${PREFIX}*"
+                ]
+              },
+              "Bool": {
+                "aws:SecureTransport": "true"
+              }
+            }
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:s3:::my-app-bucket",
+        "PREFIX": "uploads/"
+      }
+    },
+    {
+      "id": "s3-write",
+      "title": "S3 \u00b7 prefix uploader + multipart",
+      "group": "Storage",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "s3",
+          "label": "RESOURCE_ARN"
+        },
+        {
+          "env": "PREFIX",
+          "label": "S3 prefix (folder/; / for whole bucket)"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "s3:PutObject",
+              "s3:AbortMultipartUpload",
+              "s3:ListMultipartUploadParts"
+            ],
+            "Resource": "${RESOURCE_ARN}/${PREFIX}*",
+            "Condition": {
+              "Bool": {
+                "aws:SecureTransport": "true"
+              }
+            }
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:s3:::my-app-bucket",
+        "PREFIX": "uploads/"
+      }
+    },
+    {
+      "id": "s3-delete",
+      "title": "S3 \u00b7 prefix object delete",
+      "group": "Storage",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "s3",
+          "label": "RESOURCE_ARN"
+        },
+        {
+          "env": "PREFIX",
+          "label": "S3 prefix (folder/; / for whole bucket)"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "s3:DeleteObject"
+            ],
+            "Resource": "${RESOURCE_ARN}/${PREFIX}*",
+            "Condition": {
+              "Bool": {
+                "aws:SecureTransport": "true"
+              }
+            }
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:s3:::my-app-bucket",
+        "PREFIX": "uploads/"
+      }
+    },
+    {
+      "id": "efs-read",
+      "title": "EFS \u00b7 access point read",
+      "group": "Storage",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "efs",
+          "label": "RESOURCE_ARN"
+        },
+        {
+          "env": "ACCESS_POINT_ARN",
+          "kind": "efs-access-point",
+          "label": "EFS access point"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "elasticfilesystem:ClientMount"
+            ],
+            "Resource": "${RESOURCE_ARN}",
+            "Condition": {
+              "StringEquals": {
+                "elasticfilesystem:AccessPointArn": "${ACCESS_POINT_ARN}"
+              },
+              "Bool": {
+                "aws:SecureTransport": "true",
+                "elasticfilesystem:AccessedViaMountTarget": "true"
+              }
+            }
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:elasticfilesystem:eu-central-1:111122223333:file-system/fs-0123456789abcdef0",
+        "ACCESS_POINT_ARN": "arn:aws:elasticfilesystem:eu-central-1:111122223333:access-point/fsap-0123456789abcdef0"
+      }
+    },
+    {
+      "id": "efs-write",
+      "title": "EFS \u00b7 access point write",
+      "group": "Storage",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "efs",
+          "label": "RESOURCE_ARN"
+        },
+        {
+          "env": "ACCESS_POINT_ARN",
+          "kind": "efs-access-point",
+          "label": "EFS access point"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "elasticfilesystem:ClientMount",
+              "elasticfilesystem:ClientWrite"
+            ],
+            "Resource": "${RESOURCE_ARN}",
+            "Condition": {
+              "StringEquals": {
+                "elasticfilesystem:AccessPointArn": "${ACCESS_POINT_ARN}"
+              },
+              "Bool": {
+                "aws:SecureTransport": "true",
+                "elasticfilesystem:AccessedViaMountTarget": "true"
+              }
+            }
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:elasticfilesystem:eu-central-1:111122223333:file-system/fs-0123456789abcdef0",
+        "ACCESS_POINT_ARN": "arn:aws:elasticfilesystem:eu-central-1:111122223333:access-point/fsap-0123456789abcdef0"
+      }
+    },
+    {
+      "id": "secret-read",
+      "title": "Secrets Manager \u00b7 reader \u00b7 RDS / DocumentDB / MQ credentials",
+      "group": "Secrets / configuration",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "secret",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "secretsmanager:GetSecretValue",
+              "secretsmanager:DescribeSecret"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:secretsmanager:eu-central-1:111122223333:secret:my-app/database-AbCdEf"
+      }
+    },
+    {
+      "id": "secret-write",
+      "title": "Secrets Manager \u00b7 value writer",
+      "group": "Secrets / configuration",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "secret",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "secretsmanager:PutSecretValue"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:secretsmanager:eu-central-1:111122223333:secret:my-app/database-AbCdEf"
+      }
+    },
+    {
+      "id": "ssm-read",
+      "title": "SSM \u00b7 one decrypted parameter",
+      "group": "Secrets / configuration",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "ssm",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "ssm:GetParameter",
+              "ssm:GetParameters"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:ssm:eu-central-1:111122223333:parameter/my-app/database"
+      }
+    },
+    {
+      "id": "ssm-write",
+      "title": "SSM \u00b7 parameter writer",
+      "group": "Secrets / configuration",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "ssm",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "ssm:PutParameter"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:ssm:eu-central-1:111122223333:parameter/my-app/database"
+      }
+    },
+    {
+      "id": "kms-decrypt",
+      "title": "KMS \u00b7 decrypt via one AWS service",
+      "group": "Secrets / configuration",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "kms",
+          "label": "RESOURCE_ARN"
+        },
+        {
+          "env": "VIA_SERVICE",
+          "label": "Service endpoint, e.g. secretsmanager.eu-central-1.amazonaws.com"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "kms:Decrypt"
+            ],
+            "Resource": "${RESOURCE_ARN}",
+            "Condition": {
+              "StringEquals": {
+                "kms:ViaService": "${VIA_SERVICE}",
+                "kms:CallerAccount": "${ACCOUNT_ID}"
+              }
+            }
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:kms:eu-central-1:111122223333:key/12345678-1234-1234-1234-123456789abc",
+        "VIA_SERVICE": "s3.eu-central-1.amazonaws.com"
+      }
+    },
+    {
+      "id": "kms-encrypt",
+      "title": "KMS \u00b7 encrypt / data keys via one AWS service",
+      "group": "Secrets / configuration",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "kms",
+          "label": "RESOURCE_ARN"
+        },
+        {
+          "env": "VIA_SERVICE",
+          "label": "Service endpoint, e.g. s3.eu-central-1.amazonaws.com"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "kms:Encrypt",
+              "kms:GenerateDataKey",
+              "kms:Decrypt"
+            ],
+            "Resource": "${RESOURCE_ARN}",
+            "Condition": {
+              "StringEquals": {
+                "kms:ViaService": "${VIA_SERVICE}",
+                "kms:CallerAccount": "${ACCOUNT_ID}"
+              }
+            }
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:kms:eu-central-1:111122223333:key/12345678-1234-1234-1234-123456789abc",
+        "VIA_SERVICE": "s3.eu-central-1.amazonaws.com"
+      }
+    },
+    {
+      "id": "appconfig-read",
+      "title": "AppConfig Agent \u00b7 one configuration",
+      "group": "Secrets / configuration",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "appconfig",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "appconfig:StartConfigurationSession",
+              "appconfig:GetLatestConfiguration"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:appconfig:eu-central-1:111122223333:application/abc1234/environment/def5678/configuration/ghi1234"
+      }
+    },
+    {
+      "id": "sqs-send",
+      "title": "SQS / DLQ \u00b7 sender",
+      "group": "Messaging",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "sqs",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "sqs:SendMessage",
+              "sqs:GetQueueAttributes",
+              "sqs:GetQueueUrl"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:sqs:eu-central-1:111122223333:my-queue"
+      }
+    },
+    {
+      "id": "sqs-consume",
+      "title": "SQS \u00b7 consumer / Lambda trigger",
+      "group": "Messaging",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "sqs",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "sqs:ReceiveMessage",
+              "sqs:DeleteMessage",
+              "sqs:ChangeMessageVisibility",
+              "sqs:GetQueueAttributes",
+              "sqs:GetQueueUrl"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:sqs:eu-central-1:111122223333:my-queue"
+      }
+    },
+    {
+      "id": "sns-publish",
+      "title": "SNS \u00b7 topic publisher",
+      "group": "Messaging",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "sns",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "sns:Publish"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:sns:eu-central-1:111122223333:my-topic"
+      }
+    },
+    {
+      "id": "events-put",
+      "title": "EventBridge \u00b7 event bus publisher",
+      "group": "Messaging",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "events",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "events:PutEvents"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:events:eu-central-1:111122223333:event-bus/my-bus"
+      }
+    },
+    {
+      "id": "kinesis-write",
+      "title": "Kinesis \u00b7 stream writer",
+      "group": "Messaging",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "kinesis",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "kinesis:PutRecord",
+              "kinesis:PutRecords"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:kinesis:eu-central-1:111122223333:stream/my-stream"
+      }
+    },
+    {
+      "id": "kinesis-read",
+      "title": "Kinesis \u00b7 stream reader / Lambda trigger",
+      "group": "Messaging",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "kinesis",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "kinesis:GetRecords",
+              "kinesis:GetShardIterator",
+              "kinesis:DescribeStream",
+              "kinesis:DescribeStreamSummary",
+              "kinesis:ListShards"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:kinesis:eu-central-1:111122223333:stream/my-stream"
+      }
+    },
+    {
+      "id": "firehose-write",
+      "title": "Firehose \u00b7 stream writer",
+      "group": "Messaging",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "firehose",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "firehose:PutRecord",
+              "firehose:PutRecordBatch"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:firehose:eu-central-1:111122223333:deliverystream/my-stream"
+      }
+    },
+    {
+      "id": "lambda-invoke",
+      "title": "Lambda \u00b7 invoke exact function / alias ARN",
+      "group": "Compute / orchestration",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "lambda",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "lambda:InvokeFunction"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:lambda:eu-central-1:111122223333:function:my-function:live"
+      }
+    },
+    {
+      "id": "states-start",
+      "title": "Step Functions \u00b7 start execution",
+      "group": "Compute / orchestration",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "states",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "states:StartExecution"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:states:eu-central-1:111122223333:stateMachine:my-state-machine"
+      }
+    },
+    {
+      "id": "states-sync",
+      "title": "Step Functions \u00b7 start Express synchronously",
+      "group": "Compute / orchestration",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "states",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "states:StartSyncExecution"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:states:eu-central-1:111122223333:stateMachine:my-state-machine"
+      }
+    },
+    {
+      "id": "glue-start",
+      "title": "Glue \u00b7 start / inspect one job",
+      "group": "Compute / orchestration",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "glue-job",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "glue:StartJobRun",
+              "glue:GetJobRun",
+              "glue:GetJobRuns",
+              "glue:BatchStopJobRun"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:glue:eu-central-1:111122223333:job/my-job"
+      }
+    },
+    {
+      "id": "ecs-run",
+      "title": "ECS \u00b7 run one task definition in one cluster",
+      "group": "Compute / orchestration",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "ecs-task",
+          "label": "RESOURCE_ARN"
+        },
+        {
+          "env": "CLUSTER_ARN",
+          "kind": "ecs-cluster",
+          "label": "ECS cluster"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "ecs:RunTask"
+            ],
+            "Resource": "${RESOURCE_ARN}",
+            "Condition": {
+              "ArnEquals": {
+                "ecs:cluster": "${CLUSTER_ARN}"
+              }
+            }
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:ecs:eu-central-1:111122223333:task-definition/my-task:1",
+        "CLUSTER_ARN": "arn:aws:ecs:eu-central-1:111122223333:cluster/my-cluster"
+      }
+    },
+    {
+      "id": "batch-submit",
+      "title": "Batch \u00b7 submit to one queue + job definition",
+      "group": "Compute / orchestration",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "batch-queue",
+          "label": "RESOURCE_ARN"
+        },
+        {
+          "env": "JOB_DEFINITION_ARN",
+          "kind": "batch-definition",
+          "label": "Batch job definition revision"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "batch:SubmitJob"
+            ],
+            "Resource": [
+              "${RESOURCE_ARN}",
+              "${JOB_DEFINITION_ARN}"
+            ]
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:batch:eu-central-1:111122223333:job-queue/my-queue",
+        "JOB_DEFINITION_ARN": "arn:aws:batch:eu-central-1:111122223333:job-definition/my-job:1"
+      }
+    },
+    {
+      "id": "pass-ecs-role",
+      "title": "IAM \u00b7 pass one role to ECS tasks",
+      "group": "Compute / orchestration",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "role",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "iam:PassRole"
+            ],
+            "Resource": "${RESOURCE_ARN}",
+            "Condition": {
+              "StringEquals": {
+                "iam:PassedToService": "ecs-tasks.amazonaws.com"
+              }
+            }
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:iam::111122223333:role/my-app-role"
+      }
+    },
+    {
+      "id": "dynamodb-read",
+      "title": "DynamoDB \u00b7 table read",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "dynamodb",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "dynamodb:GetItem",
+              "dynamodb:BatchGetItem",
+              "dynamodb:Query",
+              "dynamodb:Scan",
+              "dynamodb:DescribeTable"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:dynamodb:eu-central-1:111122223333:table/my-table"
+      }
+    },
+    {
+      "id": "dynamodb-write",
+      "title": "DynamoDB \u00b7 table write",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "dynamodb",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "dynamodb:PutItem",
+              "dynamodb:UpdateItem"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:dynamodb:eu-central-1:111122223333:table/my-table"
+      }
+    },
+    {
+      "id": "dynamodb-delete",
+      "title": "DynamoDB \u00b7 table delete",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "dynamodb",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "dynamodb:DeleteItem"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:dynamodb:eu-central-1:111122223333:table/my-table"
+      }
+    },
+    {
+      "id": "dynamodb-index",
+      "title": "DynamoDB \u00b7 query / scan one index",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "dynamodb",
+          "label": "RESOURCE_ARN"
+        },
+        {
+          "env": "INDEX_NAME",
+          "label": "Exact index name"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "dynamodb:Query",
+              "dynamodb:Scan"
+            ],
+            "Resource": "${RESOURCE_ARN}/index/${INDEX_NAME}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:dynamodb:eu-central-1:111122223333:table/my-table",
+        "INDEX_NAME": "my-index"
+      }
+    },
+    {
+      "id": "dynamodb-stream",
+      "title": "DynamoDB Streams \u00b7 Lambda reader",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "dynamodb-stream",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "dynamodb:DescribeStream",
+              "dynamodb:GetRecords",
+              "dynamodb:GetShardIterator"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "dynamodb:ListStreams"
+            ],
+            "Resource": "*",
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestedRegion": "${REGION}"
+              }
+            }
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:dynamodb:eu-central-1:111122223333:table/my-table/stream/2026-09-09T00:00:00.000"
+      }
+    },
+    {
+      "id": "rds-connect",
+      "title": "RDS / Aurora / Proxy \u00b7 IAM DB user \u00b7 SQL grants required",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "rds-user",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "rds-db:connect"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:rds-db:eu-central-1:111122223333:dbuser:db-ABCDEFGHIJKL01234/app_user"
+      }
+    },
+    {
+      "id": "aurora-data",
+      "title": "Aurora Data API \u00b7 cluster + secret \u00b7 SQL grants required",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "rds-cluster",
+          "label": "RESOURCE_ARN"
+        },
+        {
+          "env": "SECRET_ARN",
+          "kind": "secret",
+          "label": "Database secret"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "rds-data:ExecuteStatement",
+              "rds-data:BatchExecuteStatement",
+              "rds-data:BeginTransaction",
+              "rds-data:CommitTransaction",
+              "rds-data:RollbackTransaction"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "secretsmanager:GetSecretValue"
+            ],
+            "Resource": "${SECRET_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:rds:eu-central-1:111122223333:cluster:my-cluster",
+        "SECRET_ARN": "arn:aws:secretsmanager:eu-central-1:111122223333:secret:my-app/database-AbCdEf"
+      }
+    },
+    {
+      "id": "redshift-connect",
+      "title": "Redshift \u00b7 IAM DB user \u00b7 existing user / database",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "redshift",
+          "label": "RESOURCE_ARN"
+        },
+        {
+          "env": "DB_USER",
+          "label": "Existing database user"
+        },
+        {
+          "env": "DB_NAME",
+          "label": "Database name"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "redshift:GetClusterCredentials"
+            ],
+            "Resource": [
+              "arn:${PARTITION}:redshift:${REGION}:${ACCOUNT_ID}:dbuser:${CLUSTER_NAME}/${DB_USER}",
+              "arn:${PARTITION}:redshift:${REGION}:${ACCOUNT_ID}:dbname:${CLUSTER_NAME}/${DB_NAME}"
+            ],
+            "Condition": {
+              "StringEquals": {
+                "redshift:DbUser": "${DB_USER}",
+                "redshift:DbName": "${DB_NAME}"
+              }
+            }
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:redshift:eu-central-1:111122223333:cluster:my-warehouse",
+        "DB_USER": "app_user",
+        "DB_NAME": "my_database",
+        "CLUSTER_NAME": "my-warehouse"
+      }
+    },
+    {
+      "id": "redshift-data",
+      "title": "Redshift Data API \u00b7 cluster + secret \u00b7 SQL grants required",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "redshift",
+          "label": "RESOURCE_ARN"
+        },
+        {
+          "env": "SECRET_ARN",
+          "kind": "secret",
+          "label": "Database secret"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "redshift-data:ExecuteStatement",
+              "redshift-data:BatchExecuteStatement"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "redshift-data:DescribeStatement",
+              "redshift-data:GetStatementResult",
+              "redshift-data:CancelStatement"
+            ],
+            "Resource": "*",
+            "Condition": {
+              "StringEquals": {
+                "redshift-data:statement-owner-iam-userid": "${aws:userid}",
+                "aws:RequestedRegion": "${REGION}"
+              }
+            }
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "secretsmanager:GetSecretValue"
+            ],
+            "Resource": "${SECRET_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:redshift:eu-central-1:111122223333:cluster:my-warehouse",
+        "SECRET_ARN": "arn:aws:secretsmanager:eu-central-1:111122223333:secret:my-app/database-AbCdEf"
+      }
+    },
+    {
+      "id": "redshift-serverless",
+      "title": "Redshift Serverless \u00b7 Data API + IAM login \u00b7 SQL grants required",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "redshift-serverless",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "redshift-serverless:GetCredentials",
+              "redshift-data:ExecuteStatement",
+              "redshift-data:BatchExecuteStatement"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "redshift-data:DescribeStatement",
+              "redshift-data:GetStatementResult",
+              "redshift-data:CancelStatement"
+            ],
+            "Resource": "*",
+            "Condition": {
+              "StringEquals": {
+                "redshift-data:statement-owner-iam-userid": "${aws:userid}",
+                "aws:RequestedRegion": "${REGION}"
+              }
+            }
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:redshift-serverless:eu-central-1:111122223333:workgroup/12345678-1234-1234-1234-123456789abc"
+      }
+    },
+    {
+      "id": "athena-query",
+      "title": "Athena \u00b7 workgroup queries \u00b7 add S3 + Glue grants",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "athena",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "athena:StartQueryExecution",
+              "athena:StopQueryExecution",
+              "athena:GetQueryExecution",
+              "athena:GetQueryResults",
+              "athena:GetWorkGroup"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:athena:eu-central-1:111122223333:workgroup/my-workgroup"
+      }
+    },
+    {
+      "id": "glue-read",
+      "title": "Glue Catalog \u00b7 one database / table",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "glue-table",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "glue:GetDatabase",
+              "glue:GetTable",
+              "glue:GetPartitions",
+              "glue:GetPartition",
+              "glue:BatchGetPartition"
+            ],
+            "Resource": [
+              "arn:${PARTITION}:glue:${REGION}:${ACCOUNT_ID}:catalog",
+              "arn:${PARTITION}:glue:${REGION}:${ACCOUNT_ID}:database/${DATABASE_NAME}",
+              "${RESOURCE_ARN}"
+            ]
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:glue:eu-central-1:111122223333:table/my_database/my_table",
+        "DATABASE_NAME": "my_database"
+      }
+    },
+    {
+      "id": "opensearch-read",
+      "title": "OpenSearch \u00b7 index GET / search \u00b7 FGAC required",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "opensearch",
+          "label": "RESOURCE_ARN"
+        },
+        {
+          "env": "INDEX_NAME",
+          "label": "Exact index name"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "es:ESHttpGet"
+            ],
+            "Resource": [
+              "${RESOURCE_ARN}/${INDEX_NAME}/_doc/*",
+              "${RESOURCE_ARN}/${INDEX_NAME}/_search",
+              "${RESOURCE_ARN}/${INDEX_NAME}/_count",
+              "${RESOURCE_ARN}/${INDEX_NAME}/_mapping"
+            ]
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "es:ESHttpPost"
+            ],
+            "Resource": [
+              "${RESOURCE_ARN}/${INDEX_NAME}/_search"
+            ]
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:es:eu-central-1:111122223333:domain/my-domain",
+        "INDEX_NAME": "my-index"
+      }
+    },
+    {
+      "id": "opensearch-write",
+      "title": "OpenSearch \u00b7 index document writer \u00b7 FGAC required",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "opensearch",
+          "label": "RESOURCE_ARN"
+        },
+        {
+          "env": "INDEX_NAME",
+          "label": "Exact index name"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "es:ESHttpPut",
+              "es:ESHttpPost"
+            ],
+            "Resource": [
+              "${RESOURCE_ARN}/${INDEX_NAME}/_doc/*",
+              "${RESOURCE_ARN}/${INDEX_NAME}/_create/*",
+              "${RESOURCE_ARN}/${INDEX_NAME}/_update/*",
+              "${RESOURCE_ARN}/${INDEX_NAME}/_doc"
+            ]
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:es:eu-central-1:111122223333:domain/my-domain",
+        "INDEX_NAME": "my-index"
+      }
+    },
+    {
+      "id": "elasticache-connect",
+      "title": "ElastiCache \u00b7 IAM cache + user \u00b7 Redis ACL required",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "elasticache",
+          "label": "RESOURCE_ARN"
+        },
+        {
+          "env": "USER_ARN",
+          "kind": "elasticache-user",
+          "label": "ElastiCache IAM user"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "elasticache:Connect"
+            ],
+            "Resource": [
+              "${RESOURCE_ARN}",
+              "${USER_ARN}"
+            ]
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:elasticache:eu-central-1:111122223333:replicationgroup:my-cache",
+        "USER_ARN": "arn:aws:elasticache:eu-central-1:111122223333:user:my-app-user"
+      }
+    },
+    {
+      "id": "neptune-read",
+      "title": "Neptune \u00b7 cluster read",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "neptune",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "neptune-db:ReadDataViaQuery"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:neptune-db:eu-central-1:111122223333:cluster-ABCDEFGHIJKL01234/*"
+      }
+    },
+    {
+      "id": "neptune-write",
+      "title": "Neptune \u00b7 cluster write",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "neptune",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "neptune-db:ReadDataViaQuery",
+              "neptune-db:WriteDataViaQuery"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:neptune-db:eu-central-1:111122223333:cluster-ABCDEFGHIJKL01234/*"
+      }
+    },
+    {
+      "id": "keyspaces-read",
+      "title": "Keyspaces \u00b7 table read",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "keyspaces",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "cassandra:Select"
+            ],
+            "Resource": "arn:${PARTITION}:cassandra:${REGION}:${ACCOUNT_ID}:/keyspace/system*"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "cassandra:Select"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:cassandra:eu-central-1:111122223333:/keyspace/my_keyspace/table/my_table"
+      }
+    },
+    {
+      "id": "keyspaces-write",
+      "title": "Keyspaces \u00b7 table write",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "keyspaces",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "cassandra:Select"
+            ],
+            "Resource": "arn:${PARTITION}:cassandra:${REGION}:${ACCOUNT_ID}:/keyspace/system*"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "cassandra:Select",
+              "cassandra:Modify"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:cassandra:eu-central-1:111122223333:/keyspace/my_keyspace/table/my_table"
+      }
+    },
+    {
+      "id": "dsql-connect",
+      "title": "Aurora DSQL \u00b7 non-admin IAM login \u00b7 SQL grants required",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "dsql",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "dsql:DbConnect"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:dsql:eu-central-1:111122223333:cluster/abcdefghijklmnopqrstuvwx12"
+      }
+    },
+    {
+      "id": "ecr-pull",
+      "title": "ECR \u00b7 repository pull",
+      "group": "Images",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "ecr",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "ecr:BatchGetImage",
+              "ecr:GetDownloadUrlForLayer",
+              "ecr:BatchCheckLayerAvailability"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "ecr:GetAuthorizationToken"
+            ],
+            "Resource": "*",
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestedRegion": "${REGION}"
+              }
+            }
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:ecr:eu-central-1:111122223333:repository/my-repository"
+      }
+    },
+    {
+      "id": "ecr-push",
+      "title": "ECR \u00b7 repository push",
+      "group": "Images",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "ecr",
+          "label": "RESOURCE_ARN"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "ecr:BatchCheckLayerAvailability",
+              "ecr:InitiateLayerUpload",
+              "ecr:UploadLayerPart",
+              "ecr:CompleteLayerUpload",
+              "ecr:PutImage"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "ecr:GetAuthorizationToken"
+            ],
+            "Resource": "*",
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestedRegion": "${REGION}"
+              }
+            }
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:ecr:eu-central-1:111122223333:repository/my-repository"
+      }
+    },
+    {
+      "id": "memorydb-connect",
+      "title": "MemoryDB \u00b7 IAM cluster + user \u00b7 Redis ACL required",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "memorydb",
+          "label": "memorydb resource"
+        },
+        {
+          "env": "USER_ARN",
+          "kind": "memorydb-user",
+          "label": "MemoryDB IAM user"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "memorydb:Connect"
+            ],
+            "Resource": [
+              "${RESOURCE_ARN}",
+              "${USER_ARN}"
+            ]
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:memorydb:eu-central-1:111122223333:cluster/my-cluster",
+        "USER_ARN": "arn:aws:memorydb:eu-central-1:111122223333:user/my-app-user"
+      }
+    },
+    {
+      "id": "opensearch-serverless",
+      "title": "OpenSearch Serverless \u00b7 collection API \u00b7 data access policy required",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "aoss",
+          "label": "aoss resource"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "aoss:APIAccessAll"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:aoss:eu-central-1:111122223333:collection/abcdefghijklmnopqrst"
+      }
+    },
+    {
+      "id": "timestream-read",
+      "title": "Timestream \u00b7 table read",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "timestream",
+          "label": "timestream resource"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "timestream:Select"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "timestream:DescribeEndpoints"
+            ],
+            "Resource": "*",
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestedRegion": "${REGION}"
+              }
+            }
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:timestream:eu-central-1:111122223333:database/my-database/table/my-table"
+      }
+    },
+    {
+      "id": "timestream-write",
+      "title": "Timestream \u00b7 table write",
+      "group": "Databases",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "timestream",
+          "label": "timestream resource"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "timestream:WriteRecords"
+            ],
+            "Resource": "${RESOURCE_ARN}"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "timestream:DescribeEndpoints"
+            ],
+            "Resource": "*",
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestedRegion": "${REGION}"
+              }
+            }
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:timestream:eu-central-1:111122223333:database/my-database/table/my-table"
+      }
+    },
+    {
+      "id": "msk-write",
+      "title": "MSK \u00b7 IAM topic producer",
+      "group": "Messaging",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "msk",
+          "label": "msk resource"
+        },
+        {
+          "env": "TOPIC_NAME",
+          "label": "Exact Kafka topic"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "kafka-cluster:Connect",
+              "kafka-cluster:WriteDataIdempotently"
+            ],
+            "Resource": "arn:${PARTITION}:kafka:${REGION}:${ACCOUNT_ID}:cluster/${CLUSTER_NAME}/${CLUSTER_ID}"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "kafka-cluster:DescribeTopic",
+              "kafka-cluster:WriteData"
+            ],
+            "Resource": "arn:${PARTITION}:kafka:${REGION}:${ACCOUNT_ID}:topic/${CLUSTER_NAME}/${CLUSTER_ID}/${TOPIC_NAME}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:kafka:eu-central-1:111122223333:cluster/my-cluster/12345678-1234-1234-1234-123456789abc-1",
+        "TOPIC_NAME": "my-topic",
+        "CLUSTER_NAME": "my-cluster",
+        "CLUSTER_ID": "12345678-1234-1234-1234-123456789abc-1"
+      }
+    },
+    {
+      "id": "msk-read",
+      "title": "MSK \u00b7 IAM topic + consumer group",
+      "group": "Messaging",
+      "inputs": [
+        {
+          "env": "RESOURCE_ARN",
+          "kind": "msk",
+          "label": "msk resource"
+        },
+        {
+          "env": "TOPIC_NAME",
+          "label": "Exact Kafka topic"
+        },
+        {
+          "env": "GROUP_NAME",
+          "label": "Exact Kafka consumer group"
+        }
+      ],
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "kafka-cluster:Connect"
+            ],
+            "Resource": "arn:${PARTITION}:kafka:${REGION}:${ACCOUNT_ID}:cluster/${CLUSTER_NAME}/${CLUSTER_ID}"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "kafka-cluster:DescribeTopic",
+              "kafka-cluster:ReadData"
+            ],
+            "Resource": "arn:${PARTITION}:kafka:${REGION}:${ACCOUNT_ID}:topic/${CLUSTER_NAME}/${CLUSTER_ID}/${TOPIC_NAME}"
+          },
+          {
+            "Effect": "Allow",
+            "Action": [
+              "kafka-cluster:DescribeGroup",
+              "kafka-cluster:AlterGroup"
+            ],
+            "Resource": "arn:${PARTITION}:kafka:${REGION}:${ACCOUNT_ID}:group/${CLUSTER_NAME}/${CLUSTER_ID}/${GROUP_NAME}"
+          }
+        ]
+      },
+      "example": {
+        "RESOURCE_ARN": "arn:aws:kafka:eu-central-1:111122223333:cluster/my-cluster/12345678-1234-1234-1234-123456789abc-1",
+        "TOPIC_NAME": "my-topic",
+        "GROUP_NAME": "my-consumer-group",
+        "CLUSTER_NAME": "my-cluster",
+        "CLUSTER_ID": "12345678-1234-1234-1234-123456789abc-1"
+      }
+    }
+  ],
+  "emptyPolicy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "EmptyPermissions",
+        "Effect": "Deny",
+        "NotAction": "*",
+        "Resource": "*"
+      }
+    ]
+  },
+  "exampleContext": {
+    "PARTITION": "aws",
+    "REGION": "eu-central-1",
+    "ACCOUNT_ID": "111122223333",
+    "ROLE_NAME": "my-app-role"
+  }
+}

@@ -1,0 +1,9 @@
+export AWS_DEFAULT_REGION=eu-central-1
+export AWS_REGION="$AWS_DEFAULT_REGION"
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+APP_ID=abc1234
+ENV_ID=def5678
+PROFILE_ID=ghi9012
+CONFIG_PATH="/applications/$APP_ID/environments/$ENV_ID/configurations/$PROFILE_ID"
+CONFIG_ARN="arn:aws:appconfig:$AWS_REGION:$ACCOUNT_ID:application/$APP_ID/environment/$ENV_ID/configuration/$PROFILE_ID"
+AGENT_IMAGE=public.ecr.aws/aws-appconfig/aws-appconfig-agent:2.x

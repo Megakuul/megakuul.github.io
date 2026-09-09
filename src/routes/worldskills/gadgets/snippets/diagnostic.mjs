@@ -1,7 +1,8 @@
 import { CloudWatchLogsClient, FilterLogEventsCommand } from '@aws-sdk/client-cloudwatch-logs';
 import { randomUUID } from 'node:crypto';
+import { escapeHtml } from './local-logs.mjs';
 
-const logs = new CloudWatchLogsClient({});
+const logs = new CloudWatchLogsClient({ maxAttempts: 1 });
 const MARKER = 'LAMBDA_GADGET_EVENT ';
 const CHUNK_BYTES = 120_000;
 const SENSITIVE_KEY = /authorization|cookie|password|passwd|secret|token|x-api-key/i;
@@ -199,7 +200,7 @@ function parseMessage(message) {
   }
 }
 
-async function queryOwnLogs({ hours, limit }) {
+async function queryOwnLogs({ hours, limit, signal }) {
   const logGroupName =
     process.env.DIAGNOSTIC_LOG_GROUP ?? '/aws/lambda/' + process.env.AWS_LAMBDA_FUNCTION_NAME;
   const found = [];
@@ -216,6 +217,7 @@ async function queryOwnLogs({ hours, limit }) {
         limit: Math.min(10_000, limit * 4),
         nextToken,
       }),
+      { abortSignal: signal },
     );
     found.push(...(page.events ?? []));
     nextToken = page.nextToken;
@@ -292,6 +294,35 @@ function inlineJson(value) {
     .replaceAll('>', '\\u003e');
 }
 
+function boundedDashboard(model, maxBytes) {
+  let bytes = 0;
+  let omitted = 0;
+  const entries = [];
+  for (const entry of model.entries) {
+    // Count both inline-script escaping and Lambda's JSON response-envelope escaping.
+    const size = Buffer.byteLength(JSON.stringify(inlineJson(entry)));
+    if (bytes + size > maxBytes) {
+      omitted++;
+      continue;
+    }
+    entries.push(entry);
+    bytes += size;
+  }
+  return renderDashboard({
+    ...model,
+    entries,
+    error: [
+      model.error,
+      omitted
+        ? omitted +
+          ' events omitted to fit the response limit. Narrow the time window or use CloudWatch for large events.'
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' '),
+  });
+}
+
 function renderDashboard(model) {
   return `<!doctype html>
 <html lang="en">
@@ -305,7 +336,7 @@ function renderDashboard(model) {
 </head>
 <body>
   <main class="shell">
-    <header class="top"><div><h1>Lambda Event Diagnostics</h1><div class="muted" id="subtitle"></div></div><div class="live"><span class="dot"></span> active</div></header>
+    <header class="top"><div><h1>Lambda Event Diagnostics</h1><div class="muted" id="subtitle"></div><a class="btn" href="${model.logsPath}">Local logs (no AWS permissions)</a></div><div class="live"><span class="dot"></span> active</div></header>
     <section class="controls"><input id="search" type="search" placeholder="Search type, request id, ARN, body…"><select id="kind"><option value="">Every event type</option></select><select id="window"><option value="1">Last hour</option><option value="6">Last 6 hours</option><option value="24">Last 24 hours</option><option value="168">Last 7 days</option></select><button class="btn" id="refresh">Refresh logs</button></section>
     <section class="stats"><div class="stat"><span class="muted">Events loaded</span><b id="total">0</b></div><div class="stat"><span class="muted">Recognized types</span><b id="types">0</b></div><div class="stat"><span class="muted">Stream records</span><b id="records">0</b></div><div class="stat"><span class="muted">Visible bytes</span><b id="bytes">0</b></div></section>
     <div id="error"></div>
@@ -371,17 +402,28 @@ async function runDiagnostic(event, context = {}) {
   const limit = Math.min(1000, Math.max(20, Number(query.get('limit')) || 250));
   const logGroup =
     process.env.DIAGNOSTIC_LOG_GROUP ?? '/aws/lambda/' + process.env.AWS_LAMBDA_FUNCTION_NAME;
+  const logsPath = escapeHtml(http.path.replace(/\/$/, '') + '/logs');
+  const maxBytes = event.requestContext?.elb ? 600_000 : 4_000_000;
+  const remaining = context.getRemainingTimeInMillis?.() ?? 30_000;
+  const signal = AbortSignal.any([
+    AbortSignal.timeout(Math.max(1, Math.min(6000, remaining - 1000))),
+    ...(context.gadgetAbortSignal ? [context.gadgetAbortSignal] : []),
+  ]);
 
   try {
-    const entries = await queryOwnLogs({ hours, limit });
+    const entries = await queryOwnLogs({ hours, limit: Math.floor(limit), signal });
     return response(
-      renderDashboard({
-        entries,
-        hours,
-        limit,
-        logGroup,
-        functionName: process.env.AWS_LAMBDA_FUNCTION_NAME,
-      }),
+      boundedDashboard(
+        {
+          entries,
+          hours,
+          limit,
+          logGroup,
+          logsPath,
+          functionName: process.env.AWS_LAMBDA_FUNCTION_NAME,
+        },
+        maxBytes,
+      ),
     );
   } catch (error) {
     console.error('Lambda Gadget dashboard query failed:', error);
@@ -391,8 +433,13 @@ async function runDiagnostic(event, context = {}) {
         hours,
         limit,
         logGroup,
+        logsPath,
         functionName: process.env.AWS_LAMBDA_FUNCTION_NAME,
-        error: error.name + ': ' + error.message,
+        error:
+          error.name +
+          ': ' +
+          error.message +
+          '. Check logs:FilterLogEvents permission and CloudWatch connectivity, or open local logs.',
       }),
     );
   }
@@ -405,6 +452,20 @@ export async function diagnostic(event, context = {}) {
     try {
       console.error('Lambda Gadget disabled itself after an unexpected error:', error);
     } catch {}
+    if (dashboardRequest(event)) {
+      if (!dashboardAuthorized(event))
+        return response('<h1>Authentication required</h1>', 401, {
+          'www-authenticate': 'Basic realm="Lambda diagnostics"',
+        });
+      return response(
+        '<h1>Lambda diagnostic error</h1><pre>' +
+          escapeHtml(error?.stack ?? error) +
+          '</pre><a href="' +
+          escapeHtml(httpInfo(event).path.replace(/\/$/, '') + '/logs') +
+          '">View local logs</a>',
+        500,
+      );
+    }
     return null;
   }
 }

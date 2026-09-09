@@ -15,7 +15,7 @@ npm install \
   pg mysql2 mongodb cassandra-driver redis memcache-client
 
 zip -r database-gadget.zip \
-  database-index.mjs database-workbench.mjs package.json package-lock.json node_modules
+  database-index.mjs database-workbench.mjs local-logs.mjs package.json package-lock.json node_modules
 
 aws secretsmanager create-secret \
   --name gadget/database-connections \
@@ -24,6 +24,8 @@ aws secretsmanager create-secret \
 aws lambda update-function-code \
   --function-name database-gadget \
   --zip-file fileb://database-gadget.zip
+
+aws lambda wait function-updated --function-name database-gadget
 
 aws lambda update-function-configuration \
   --function-name database-gadget \

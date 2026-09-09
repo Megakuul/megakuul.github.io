@@ -1,6 +1,7 @@
-import { diagnostic } from './diagnostic.mjs';
+import { withLocalLogs } from './local-logs.mjs';
 
-export const handler = async (event, context) => {
+export const handler = withLocalLogs(async (event, context) => {
+  const { diagnostic } = await import('./diagnostic.mjs');
   const diagnosticResponse = await diagnostic(event, context);
   if (diagnosticResponse) return diagnosticResponse;
 
@@ -12,4 +13,4 @@ export const handler = async (event, context) => {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ ok: true, receivedAt: new Date().toISOString() }),
   };
-};
+});

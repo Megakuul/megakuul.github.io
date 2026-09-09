@@ -1,4 +1,4 @@
-import { diagnostic } from './diagnostic.mjs';
+import { withLocalLogs } from './local-logs.mjs';
 
 const HOP_BY_HOP = new Set([
   'connection',
@@ -75,7 +75,8 @@ async function afterForward(response, body) {
   return { response, body };
 }
 
-export const handler = async (event, context) => {
+export const handler = withLocalLogs(async (event, context) => {
+  const { diagnostic } = await import('./diagnostic.mjs');
   const diagnosticResponse = await diagnostic(event, context);
   if (diagnosticResponse) return diagnosticResponse;
 
@@ -107,4 +108,4 @@ export const handler = async (event, context) => {
   return inbound.version === '2.0'
     ? { ...base, cookies }
     : { ...base, multiValueHeaders: cookies.length ? { 'set-cookie': cookies } : undefined };
-};
+});

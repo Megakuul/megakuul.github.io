@@ -1,0 +1,42 @@
+{
+  "runtimes": [
+    "nodejs22.x",
+    "nodejs24.x"
+  ],
+  "architectures": [
+    "x86_64",
+    "arm64"
+  ],
+  "oracleMode": "thin",
+  "dependencies": {
+    "@aws-sdk/client-athena": "3.1128.0",
+    "@aws-sdk/client-redshift-data": "3.1128.0",
+    "@aws-sdk/credential-providers": "3.1128.0",
+    "@aws-sdk/dsql-signer": "3.1128.0",
+    "@aws/aurora-dsql-node-postgres-connector": "0.1.9",
+    "@opensearch-project/opensearch": "3.6.0",
+    "cassandra-driver": "4.9.0",
+    "memcache-client": "1.0.5",
+    "mongodb": "7.6.0",
+    "mssql": "12.7.1",
+    "mysql2": "3.24.4",
+    "oracledb": "7.0.1",
+    "pg": "8.23.0",
+    "redis": "6.2.1"
+  },
+  "scope": "AWS-managed database and analytics services",
+  "sources": {
+    "@opensearch-project/opensearch": "https://docs.aws.amazon.com/opensearch-service/latest/developerguide/serverless-clients.html",
+    "@aws-sdk/client-redshift-data": "https://docs.aws.amazon.com/redshift-data/latest/APIReference/API_BatchExecuteStatement.html",
+    "@aws-sdk/client-athena": "https://docs.aws.amazon.com/athena/latest/APIReference/API_StartQueryExecution.html",
+    "pg": "https://node-postgres.com/features/queries",
+    "mysql2": "https://sidorares.github.io/node-mysql2/docs",
+    "mssql": "https://github.com/tediousjs/node-mssql",
+    "oracledb": "https://node-oracledb.readthedocs.io/en/latest/user_guide/sql_execution.html",
+    "mongodb": "https://www.mongodb.com/docs/drivers/node/current/crud/",
+    "redis": "https://redis.io/docs/latest/develop/clients/nodejs/",
+    "cassandra-driver": "https://docs.datastax.com/en/developer/nodejs-driver/4.8/",
+    "memcache-client": "https://github.com/electrode-io/memcache",
+    "@aws/aurora-dsql-node-postgres-connector": "https://github.com/awslabs/aurora-dsql-connectors"
+  }
+}

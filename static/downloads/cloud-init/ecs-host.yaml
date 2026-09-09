@@ -1,0 +1,22 @@
+#cloud-config
+ssh_pwauth: false
+disable_root: true
+write_files:
+- path: /etc/ecs/ecs.config
+  owner: root:root
+  permissions: '0644'
+  defer: true
+  content: |
+    ECS_CLUSTER=my-cluster
+    ECS_ENABLE_TASK_IAM_ROLE=true
+    ECS_ENABLE_TASK_IAM_ROLE_NETWORK_HOST=true
+    ECS_AWSVPC_BLOCK_IMDS=true
+    ECS_DISABLE_PRIVILEGED=true
+    ECS_ENABLE_AWSLOGS_EXECUTIONROLE_OVERRIDE=true
+    ECS_LOGLEVEL=info
+runcmd:
+- - systemctl
+  - enable
+  - --now
+  - --no-block
+  - ecs
