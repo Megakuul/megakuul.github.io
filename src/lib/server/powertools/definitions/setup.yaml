@@ -1463,7 +1463,6 @@
                   - Arn
               Timeout: 240
               MemorySize: 256
-              ReservedConcurrentExecutions: 1
               Code:
                 ZipFile: |
                   const modules={sqs:require('@aws-sdk/client-sqs'),lambda:require('@aws-sdk/client-lambda'),sns:require('@aws-sdk/client-sns'),events:require('@aws-sdk/client-eventbridge'),scheduler:require('@aws-sdk/client-scheduler'),cloudwatch:require('@aws-sdk/client-cloudwatch')};
