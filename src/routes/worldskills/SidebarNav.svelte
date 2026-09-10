@@ -89,6 +89,6 @@
   }
   .nav-active {
     color: rgb(241, 245, 249);
-    border-color: rgb(192, 132, 252);
+    border-color: var(--sidebar-active-border, rgb(192, 132, 252));
   }
 </style>

@@ -1,1 +1,1 @@
-<!-- The previous article URL redirects to Generator. -->
+<!-- The previous article URL redirects to Powertools. -->
