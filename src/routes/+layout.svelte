@@ -6,7 +6,30 @@
   import title from '$lib/assets/title.png';
 
   let { children } = $props();
+  let dPresses = 0;
+
+  /** @param {KeyboardEvent} event */
+  function togglePerformanceMode(event) {
+    if (event.repeat) return;
+    const typing =
+      event.target instanceof HTMLElement &&
+      (event.target.isContentEditable || event.target.matches('input, textarea, select'));
+    dPresses =
+      !typing &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      event.key.toLowerCase() === 'd'
+        ? dPresses + 1
+        : 0;
+    if (dPresses === 3) {
+      document.documentElement.classList.toggle('performance-mode');
+      dPresses = 0;
+    }
+  }
 </script>
+
+<svelte:window onkeydown={togglePerformanceMode} />
 
 <Header />
 
@@ -47,3 +70,10 @@
     <a href="/imprint" class="font-bold text-center link link-hover">Imprint</a>
   </div>
 </footer>
+
+<style>
+  :global(html.performance-mode::before) {
+    display: none;
+    animation: none;
+  }
+</style>

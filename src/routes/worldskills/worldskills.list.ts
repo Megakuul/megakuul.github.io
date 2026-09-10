@@ -143,7 +143,7 @@ export const projects: Record<string, Project> = {
     title: 'Watch Out 🙈',
     description: 'Who is grafana? should I know this guy?',
     published: '10.08.2026',
-    services: ['cloudwatch'],
+    services: ['cloudwatch', 'ec2', 'iam'],
   },
   'expensive-filesystem': {
     title: 'Expensive FileSystem',

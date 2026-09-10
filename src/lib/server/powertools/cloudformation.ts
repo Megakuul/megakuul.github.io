@@ -1,9 +1,8 @@
-import { Document, Pair, YAMLMap, YAMLSeq } from 'yaml';
+import { Document, Pair, YAMLMap, YAMLSeq, type Node } from 'yaml';
 
-/** @param {object} template */
-export function cloudFormationYaml(template) {
+export function cloudFormationYaml(template: object) {
   const document = new Document(undefined, { version: '1.1' });
-  const tags = {
+  const tags: Record<string, string> = {
     Ref: '!Ref',
     'Fn::Sub': '!Sub',
     'Fn::GetAtt': '!GetAtt',
@@ -12,8 +11,7 @@ export function cloudFormationYaml(template) {
     'Fn::Not': '!Not',
     'Fn::Join': '!Join',
   };
-  /** @param {any} value @returns {any} */
-  function node(value) {
+  function node(value: any): Node {
     if (Array.isArray(value)) {
       const sequence = new YAMLSeq();
       sequence.items = value.map(node);
@@ -24,7 +22,7 @@ export function cloudFormationYaml(template) {
       if (entries.length === 1 && entries[0][0] in tags) {
         const [key, data] = entries[0];
         const intrinsic = node(key === 'Fn::GetAtt' && Array.isArray(data) ? data.join('.') : data);
-        intrinsic.tag = tags[/** @type {keyof typeof tags} */ (key)];
+        intrinsic.tag = tags[key];
         return intrinsic;
       }
       const mapping = new YAMLMap();

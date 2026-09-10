@@ -1,0 +1,1055 @@
+- id: services
+  title: Services
+  recipes:
+    - id: service-lambda
+      title: Lambda
+      env:
+        - name: NAME
+          example: my-function
+          required: true
+          type: string
+          hint: ''
+          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
+        - name: ROLE_NAME
+          example: my-app-role
+          required: true
+          type: string
+          hint: Existing execution role; paste the required service permissions into its bound policy.
+          pattern: '[A-Za-z0-9+=,.@_-]{1,64}'
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: lambda
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          Name:
+            Type: String
+          RoleArn:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Logs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/lambda/${Name}
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Function:
+            Type: AWS::Lambda::Function
+            Properties:
+              FunctionName:
+                Ref: Name
+              Runtime: nodejs24.x
+              Handler: index.handler
+              Role:
+                Ref: RoleArn
+              Code:
+                ZipFile: exports.handler=async()=>{throw new Error("Deploy application code before invoking this function.");};
+              MemorySize: 256
+              Timeout: 10
+              Architectures:
+                - arm64
+              ReservedConcurrentExecutions: 5
+              LoggingConfig:
+                LogFormat: JSON
+                ApplicationLogLevel: INFO
+                SystemLogLevel: INFO
+                LogGroup:
+                  Ref: Logs
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Retries:
+            Type: AWS::Lambda::EventInvokeConfig
+            Properties:
+              FunctionName:
+                Ref: Function
+              Qualifier: $LATEST
+              MaximumRetryAttempts: 2
+              MaximumEventAgeInSeconds: 3600
+        Outputs:
+          FunctionArn:
+            Value:
+              Fn::GetAtt:
+                - Function
+                - Arn
+    - id: service-s3
+      title: S3
+      env:
+        - name: NAME
+          example: my-app-bucket-111122223333
+          required: true
+          type: string
+          hint: ''
+          pattern: '[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]'
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: s3
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          Name:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          AccessLogs:
+            Type: AWS::S3::Bucket
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              OwnershipControls:
+                Rules:
+                  - ObjectOwnership: BucketOwnerEnforced
+              PublicAccessBlockConfiguration:
+                BlockPublicAcls: true
+                IgnorePublicAcls: true
+                BlockPublicPolicy: true
+                RestrictPublicBuckets: true
+              BucketEncryption:
+                ServerSideEncryptionConfiguration:
+                  - ServerSideEncryptionByDefault:
+                      SSEAlgorithm: AES256
+              VersioningConfiguration:
+                Status: Enabled
+              LifecycleConfiguration:
+                Rules:
+                  - Id: AbortIncompleteUploads
+                    Status: Enabled
+                    AbortIncompleteMultipartUpload:
+                      DaysAfterInitiation: 7
+                  - Id: OldVersions
+                    Prefix: ''
+                    Status: Enabled
+                    NoncurrentVersionExpiration:
+                      NoncurrentDays: 90
+                      NewerNoncurrentVersions: 5
+                  - Id: ExpireLogs
+                    Status: Enabled
+                    ExpirationInDays: 90
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          LogPolicy:
+            Type: AWS::S3::BucketPolicy
+            Properties:
+              Bucket:
+                Ref: AccessLogs
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Deny
+                    Principal: '*'
+                    Action: s3:*
+                    Resource:
+                      - Fn::GetAtt:
+                          - AccessLogs
+                          - Arn
+                      - Fn::Sub: ${AccessLogs.Arn}/*
+                    Condition:
+                      Bool:
+                        aws:SecureTransport: 'false'
+                        aws:PrincipalIsAWSService: 'false'
+                  - Effect: Allow
+                    Principal:
+                      Service: logging.s3.amazonaws.com
+                    Action: s3:PutObject
+                    Resource:
+                      Fn::Sub: ${AccessLogs.Arn}/access/*
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Ref: AWS::AccountId
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:s3:::${Name}
+          Bucket:
+            Type: AWS::S3::Bucket
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              BucketName:
+                Ref: Name
+              OwnershipControls:
+                Rules:
+                  - ObjectOwnership: BucketOwnerEnforced
+              PublicAccessBlockConfiguration:
+                BlockPublicAcls: true
+                IgnorePublicAcls: true
+                BlockPublicPolicy: true
+                RestrictPublicBuckets: true
+              BucketEncryption:
+                ServerSideEncryptionConfiguration:
+                  - ServerSideEncryptionByDefault:
+                      SSEAlgorithm: AES256
+              VersioningConfiguration:
+                Status: Enabled
+              LifecycleConfiguration:
+                Rules:
+                  - Id: AbortIncompleteUploads
+                    Status: Enabled
+                    AbortIncompleteMultipartUpload:
+                      DaysAfterInitiation: 7
+                  - Id: OldVersions
+                    Prefix: ''
+                    Status: Enabled
+                    NoncurrentVersionExpiration:
+                      NoncurrentDays: 90
+                      NewerNoncurrentVersions: 5
+              LoggingConfiguration:
+                DestinationBucketName:
+                  Ref: AccessLogs
+                LogFilePrefix: access/
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+            DependsOn: LogPolicy
+          Policy:
+            Type: AWS::S3::BucketPolicy
+            Properties:
+              Bucket:
+                Ref: Bucket
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Deny
+                    Principal: '*'
+                    Action: s3:*
+                    Resource:
+                      - Fn::GetAtt:
+                          - Bucket
+                          - Arn
+                      - Fn::Sub: ${Bucket.Arn}/*
+                    Condition:
+                      Bool:
+                        aws:SecureTransport: 'false'
+                        aws:PrincipalIsAWSService: 'false'
+                  - Effect: Deny
+                    Principal: '*'
+                    Action: s3:PutObject
+                    Resource:
+                      Fn::Sub: ${Bucket.Arn}/*
+                    Condition:
+                      'Null':
+                        s3:x-amz-server-side-encryption-customer-algorithm: 'false'
+        Outputs:
+          Bucket:
+            Value:
+              Ref: Bucket
+    - id: service-sqs
+      title: SQS
+      env:
+        - name: NAME
+          example: my-queue
+          required: true
+          type: string
+          hint: Add .fifo to NAME for a FIFO queue; a matching DLQ is created automatically.
+          pattern: "[A-Za-z0-9_-]{1,70}(?:\\.fifo)?"
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: sqs
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          Name:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          DLQ:
+            Type: AWS::SQS::Queue
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              QueueName:
+                Fn::Sub: ${Name}-dlq
+              SqsManagedSseEnabled: true
+              MessageRetentionPeriod: 1209600
+              ReceiveMessageWaitTimeSeconds: 20
+              VisibilityTimeout: 180
+              RedriveAllowPolicy:
+                redrivePermission: allowAll
+              Tags:
+                - Key: MonitoringRole
+                  Value: dlq
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Queue:
+            Type: AWS::SQS::Queue
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              QueueName:
+                Ref: Name
+              SqsManagedSseEnabled: true
+              MessageRetentionPeriod: 345600
+              ReceiveMessageWaitTimeSeconds: 20
+              VisibilityTimeout: 180
+              RedrivePolicy:
+                deadLetterTargetArn:
+                  Fn::GetAtt:
+                    - DLQ
+                    - Arn
+                maxReceiveCount: 5
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          TLS:
+            Type: AWS::SQS::QueuePolicy
+            Properties:
+              Queues:
+                - Ref: Queue
+                - Ref: DLQ
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Deny
+                    Principal: '*'
+                    Action: sqs:*
+                    Resource:
+                      - Fn::GetAtt:
+                          - Queue
+                          - Arn
+                      - Fn::GetAtt:
+                          - DLQ
+                          - Arn
+                    Condition:
+                      Bool:
+                        aws:SecureTransport: 'false'
+                        aws:PrincipalIsAWSService: 'false'
+        Outputs:
+          QueueArn:
+            Value:
+              Fn::GetAtt:
+                - Queue
+                - Arn
+          DLQArn:
+            Value:
+              Fn::GetAtt:
+                - DLQ
+                - Arn
+    - id: service-sns
+      title: SNS
+      env:
+        - name: NAME
+          example: my-topic
+          required: true
+          type: string
+          hint: ''
+          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: sns
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          Name:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Topic:
+            Type: AWS::SNS::Topic
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              TopicName:
+                Ref: Name
+              KmsMasterKeyId: alias/aws/sns
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          TLS:
+            Type: AWS::SNS::TopicPolicy
+            Properties:
+              Topics:
+                - Ref: Topic
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Deny
+                    Principal: '*'
+                    Action: sns:*
+                    Resource:
+                      Ref: Topic
+                    Condition:
+                      Bool:
+                        aws:SecureTransport: 'false'
+                        aws:PrincipalIsAWSService: 'false'
+        Outputs:
+          TopicArn:
+            Value:
+              Ref: Topic
+    - id: service-eventbridge
+      title: EventBridge
+      env:
+        - name: NAME
+          example: my-event-bus
+          required: true
+          type: string
+          hint: ''
+          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: eventbridge
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          Name:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Bus:
+            Type: AWS::Events::EventBus
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Name:
+                Ref: Name
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+        Outputs:
+          BusArn:
+            Value:
+              Fn::GetAtt:
+                - Bus
+                - Arn
+    - id: service-ecr
+      title: ECR
+      env:
+        - name: NAME
+          example: my-app/backend
+          required: true
+          type: string
+          hint: ''
+          pattern: '[a-z0-9]+(?:[._/-][a-z0-9]+)*'
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: ecr
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          Name:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Repository:
+            Type: AWS::ECR::Repository
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              RepositoryName:
+                Ref: Name
+              ImageTagMutability: IMMUTABLE
+              ImageScanningConfiguration:
+                ScanOnPush: true
+              EncryptionConfiguration:
+                EncryptionType: AES256
+              LifecyclePolicy:
+                LifecyclePolicyText: '{"rules":[{"rulePriority":1,"description":"Expire old untagged images","selection":{"tagStatus":"untagged","countType":"sinceImagePushed","countUnit":"days","countNumber":30},"action":{"type":"expire"}}]}'
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+        Outputs:
+          RepositoryArn:
+            Value:
+              Fn::GetAtt:
+                - Repository
+                - Arn
+    - id: service-ecs
+      title: ECS
+      env:
+        - name: NAME
+          example: my-cluster
+          required: true
+          type: string
+          hint: ''
+          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: ecs
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          Name:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          ExecLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/ecs/${Name}/exec
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Cluster:
+            Type: AWS::ECS::Cluster
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              ClusterName:
+                Ref: Name
+              Configuration:
+                ExecuteCommandConfiguration:
+                  Logging: OVERRIDE
+                  LogConfiguration:
+                    CloudWatchLogGroupName:
+                      Ref: ExecLogs
+              ClusterSettings:
+                - Name: containerInsights
+                  Value: enhanced
+              CapacityProviders:
+                - FARGATE
+                - FARGATE_SPOT
+              DefaultCapacityProviderStrategy:
+                - CapacityProvider: FARGATE
+                  Weight: 1
+                  Base: 1
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+        Outputs:
+          ClusterArn:
+            Value:
+              Fn::GetAtt:
+                - Cluster
+                - Arn
+    - id: service-logs
+      title: CloudWatch Logs
+      env:
+        - name: NAME
+          example: /app/my-app
+          required: true
+          type: string
+          hint: ''
+          pattern: "[.\\-_/#A-Za-z0-9]{1,512}"
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: logs
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          Name:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Logs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Ref: Name
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+        Outputs:
+          LogGroup:
+            Value:
+              Ref: Logs
+    - id: service-secret
+      title: Secrets Manager
+      env:
+        - name: NAME
+          example: my-app/database
+          required: true
+          type: string
+          hint: ''
+          pattern: '[A-Za-z0-9/_+=.@-]{1,512}'
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: secret
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          Name:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Secret:
+            Type: AWS::SecretsManager::Secret
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Name:
+                Ref: Name
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+        Outputs:
+          SecretArn:
+            Value:
+              Ref: Secret
+    - id: service-appconfig
+      title: AppConfig
+      env:
+        - name: NAME
+          example: my-app
+          required: true
+          type: string
+          hint: ''
+          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: appconfig
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          Name:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Application:
+            Type: AWS::AppConfig::Application
+            Properties:
+              Name:
+                Ref: Name
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Environment:
+            Type: AWS::AppConfig::Environment
+            Properties:
+              ApplicationId:
+                Ref: Application
+              Name: test
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Profile:
+            Type: AWS::AppConfig::ConfigurationProfile
+            Properties:
+              ApplicationId:
+                Ref: Application
+              Name: settings
+              LocationUri: hosted
+              Type: AWS.Freeform
+              Validators:
+                - Type: JSON_SCHEMA
+                  Content: '{"type":"object"}'
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Strategy:
+            Type: AWS::AppConfig::DeploymentStrategy
+            Properties:
+              Name:
+                Fn::Sub: ${Name}-gradual
+              DeploymentDurationInMinutes: 10
+              FinalBakeTimeInMinutes: 10
+              GrowthFactor: 20
+              GrowthType: LINEAR
+              ReplicateTo: NONE
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+        Outputs:
+          ApplicationId:
+            Value:
+              Ref: Application
+          EnvironmentId:
+            Value:
+              Ref: Environment
+          ProfileId:
+            Value:
+              Ref: Profile
+    - id: service-states
+      title: Step Functions
+      env:
+        - name: NAME
+          example: my-workflow
+          required: true
+          type: string
+          hint: ''
+          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
+        - name: ROLE_NAME
+          example: my-app-role
+          required: true
+          type: string
+          hint: Existing execution role; paste the required service permissions into its bound policy.
+          pattern: '[A-Za-z0-9+=,.@_-]{1,64}'
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: states
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          Name:
+            Type: String
+          RoleArn:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Logs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/states/${Name}
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          StateMachine:
+            Type: AWS::StepFunctions::StateMachine
+            Properties:
+              StateMachineName:
+                Ref: Name
+              StateMachineType: STANDARD
+              RoleArn:
+                Ref: RoleArn
+              Definition:
+                StartAt: ConfigureWorkflow
+                States:
+                  ConfigureWorkflow:
+                    Type: Fail
+                    Error: NotConfigured
+                    Cause: Replace with your workflow.
+              LoggingConfiguration:
+                Level: ERROR
+                IncludeExecutionData: false
+                Destinations:
+                  - CloudWatchLogsLogGroup:
+                      LogGroupArn:
+                        Fn::GetAtt:
+                          - Logs
+                          - Arn
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+        Outputs:
+          StateMachineArn:
+            Value:
+              Ref: StateMachine
+    - id: service-athena
+      title: Athena
+      env:
+        - name: NAME
+          example: my-workgroup
+          required: true
+          type: string
+          hint: ''
+          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: athena
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          Name:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Workgroup:
+            Type: AWS::Athena::WorkGroup
+            Properties:
+              Name:
+                Ref: Name
+              WorkGroupConfiguration:
+                EnforceWorkGroupConfiguration: true
+                ManagedQueryResultsConfiguration:
+                  Enabled: true
+                PublishCloudWatchMetricsEnabled: true
+                BytesScannedCutoffPerQuery: 1073741824
+                RequesterPaysEnabled: false
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+        Outputs: {}
+    - id: service-kinesis
+      title: Kinesis
+      env:
+        - name: NAME
+          example: my-stream
+          required: true
+          type: string
+          hint: ''
+          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: kinesis
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          Name:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Stream:
+            Type: AWS::Kinesis::Stream
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Name:
+                Ref: Name
+              StreamModeDetails:
+                StreamMode: ON_DEMAND
+              RetentionPeriodHours: 72
+              StreamEncryption:
+                EncryptionType: KMS
+                KeyId: alias/aws/kinesis
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          TLS:
+            Type: AWS::Kinesis::ResourcePolicy
+            Properties:
+              ResourceArn:
+                Fn::GetAtt:
+                  - Stream
+                  - Arn
+              ResourcePolicy:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Deny
+                    Principal: '*'
+                    Action: kinesis:*
+                    Resource:
+                      Fn::GetAtt:
+                        - Stream
+                        - Arn
+                    Condition:
+                      Bool:
+                        aws:SecureTransport: 'false'
+                        aws:PrincipalIsAWSService: 'false'
+        Outputs:
+          StreamArn:
+            Value:
+              Fn::GetAtt:
+                - Stream
+                - Arn
+    - id: service-security
+      title: GuardDuty and IAM Access Analyzer
+      env:
+        - name: NAME
+          example: account-access
+          required: true
+          type: string
+          pattern: '[A-Za-z][A-Za-z0-9_-]{0,254}'
+          hint: External-access analyzer name. Reuses an existing account external-access analyzer in REGION, even if named differently.
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: security
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          Name:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Detector:
+            Type: AWS::GuardDuty::Detector
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Enable: true
+              FindingPublishingFrequency: FIFTEEN_MINUTES
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Analyzer:
+            Type: AWS::AccessAnalyzer::Analyzer
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              AnalyzerName:
+                Ref: Name
+              Type: ACCOUNT
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+        Outputs:
+          DetectorId:
+            Value:
+              Ref: Detector
+          AnalyzerArn:
+            Value:
+              Fn::GetAtt:
+                - Analyzer
+                - Arn
+      cli: security

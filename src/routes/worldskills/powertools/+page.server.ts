@@ -1,7 +1,7 @@
-import { cloudFormationYaml } from './template-format.mjs';
+import { cloudFormationYaml } from '$lib/server/powertools/cloudformation';
 import { createHighlighter } from 'shiki';
 import dracula from 'shiki/themes/dracula.mjs';
-import { powertoolsGroups } from './recipes.mjs';
+import { powertoolsGroups } from '$lib/server/powertools';
 import type { PageServerLoad } from './$types';
 export const load: PageServerLoad = async () => {
   const highlighter = await createHighlighter({
@@ -35,7 +35,12 @@ export const load: PageServerLoad = async () => {
             command,
             cliCommand,
             cfnTagNote: recipe.cfnTagNote ?? null,
-            commandHtml: highlighter.codeToHtml(command, { lang: 'bash', theme: 'dracula' }),
+            commandHtml: highlighter.codeToHtml(
+              recipe.templateFile
+                ? command.replace(' && aws cloudformation ', '\naws cloudformation ')
+                : command,
+              { lang: 'bash', theme: 'dracula' },
+            ),
             cliHtml: cliCommand
               ? highlighter.codeToHtml(cliCommand, { lang: 'bash', theme: 'dracula' })
               : null,

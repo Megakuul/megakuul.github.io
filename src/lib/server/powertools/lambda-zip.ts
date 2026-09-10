@@ -1,5 +1,5 @@
-/** Build the single-file Lambda ZIP during page generation, without client-side tooling. @param {string} code */
-export function lambdaZip(code) {
+/** Build the single-file Lambda ZIP during page generation, without client-side tooling. */
+export function lambdaZip(code: string) {
   const data = new TextEncoder().encode(code),
     name = new TextEncoder().encode('index.js');
   let crc = 0xffffffff;

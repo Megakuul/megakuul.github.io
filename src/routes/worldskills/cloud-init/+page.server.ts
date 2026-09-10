@@ -13,15 +13,15 @@ export const load: PageServerLoad = async () => {
     { id: 'launch-ec2', title: 'Launch EC2', snippets: commands },
     {
       id: 'user-data',
-      title: 'User data · Amazon Linux 2023 · edit values in YAML',
+      title: 'User Data',
       snippets: cloudConfigs.map(snippet => ({
         ...snippet,
         lang: 'yaml',
         code: files['../../../../static/downloads/cloud-init/' + snippet.file] as string,
       })),
     },
-    { id: 'instance-permissions', title: 'Instance role · policies', snippets: policies },
-    { id: 'operations', title: 'On instance', snippets: operations },
+    { id: 'instance-permissions', title: 'Policies', snippets: policies },
+    { id: 'operations', title: 'Operations', snippets: operations },
   ];
   const highlighter = await createHighlighter({
     themes: [dracula],

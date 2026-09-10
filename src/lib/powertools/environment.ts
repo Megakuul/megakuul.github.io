@@ -1,8 +1,7 @@
-/** @param {import('./environment.mjs').EnvVariable} v */
-export function exampleExport(v) {
+import type { EnvVariable } from './types';
+export function exampleExport(v: EnvVariable) {
   return `export ${v.name}=${"'" + v.example.replaceAll("'", "'\"'\"'") + "'"}`;
 }
-/** @param {import('./environment.mjs').EnvVariable} v */
-export function environmentHint(v) {
+export function environmentHint(v: EnvVariable) {
   return `${v.required ? 'Required' : `Default: ${v.default}`}\n${exampleExport(v)}${v.hint ? '\n' + v.hint : ''}\nClick to copy example`;
 }

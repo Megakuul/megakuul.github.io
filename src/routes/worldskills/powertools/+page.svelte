@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { exampleExport, environmentHint } from './environment-display.mjs';
+  import { exampleExport, environmentHint } from '$lib/powertools/environment';
   import SidebarNav from '../SidebarNav.svelte';
 
   let { data } = $props();
@@ -106,7 +106,7 @@
                   <button
                     class="copy-button"
                     aria-pressed={!!cliModes[snippet.id]}
-                    onclick={() => (cliModes[snippet.id] = true)}>AWS CLI · emergency</button
+                    onclick={() => (cliModes[snippet.id] = true)}>AWS CLI</button
                   >
                 </div>
               {/if}
@@ -114,7 +114,7 @@
                 <div
                   class="flex flex-wrap gap-1.5 border-b border-white/5 px-4 py-2"
                   role="group"
-                  aria-label="Environment variables · * required"
+                  aria-label="Environment variables (* required)"
                 >
                   {#each cliModes[snippet.id] && snippet.cliEnv ? snippet.cliEnv : snippet.env as variable}
                     <button

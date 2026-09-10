@@ -1,0 +1,812 @@
+- id: iam-access-observability
+  title: Observability policies
+  recipes:
+    - id: iam-access-logs-write
+      title: CloudWatch Logs Write
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: arn:aws:logs:eu-central-1:111122223333:log-group:/app/my-app:log-stream:*
+    - id: iam-access-logs-stream
+      title: CloudWatch Log Stream Write
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:PutLogEvents
+            Resource: arn:aws:logs:eu-central-1:111122223333:log-group:/app/my-app:log-stream:my-stream
+    - id: iam-access-flow-logs
+      title: VPC Flow Logs
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: arn:aws:logs:eu-central-1:111122223333:log-group:/app/my-app:log-stream:*
+          - Effect: Allow
+            Action:
+              - logs:DescribeLogStreams
+            Resource: arn:aws:logs:eu-central-1:111122223333:log-group:/app/my-app:*
+          - Effect: Allow
+            Action:
+              - logs:DescribeLogGroups
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: eu-central-1
+    - id: iam-access-step-functions-logs
+      title: Step Functions Logging
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: arn:aws:logs:eu-central-1:111122223333:log-group:/app/my-app:log-stream:*
+          - Effect: Allow
+            Action:
+              - logs:CreateLogDelivery
+              - logs:GetLogDelivery
+              - logs:UpdateLogDelivery
+              - logs:DeleteLogDelivery
+              - logs:ListLogDeliveries
+              - logs:PutResourcePolicy
+              - logs:DescribeResourcePolicies
+              - logs:DescribeLogGroups
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: eu-central-1
+    - id: iam-access-metrics-write
+      title: CloudWatch Metrics
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - cloudwatch:PutMetricData
+            Resource: '*'
+            Condition:
+              StringEquals:
+                cloudwatch:namespace: MyApp/Pipeline
+                aws:RequestedRegion: eu-central-1
+    - id: iam-access-xray-write
+      title: X-Ray
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - xray:PutTraceSegments
+              - xray:PutTelemetryRecords
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: eu-central-1
+- id: iam-access-storage
+  title: Storage policies
+  recipes:
+    - id: iam-access-s3-read
+      title: S3 Read
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource: arn:aws:s3:::my-app-bucket/uploads/*
+            Condition:
+              Bool:
+                aws:SecureTransport: 'true'
+          - Effect: Allow
+            Action:
+              - s3:ListBucket
+            Resource: arn:aws:s3:::my-app-bucket
+            Condition:
+              StringLike:
+                s3:prefix:
+                  - uploads/*
+              Bool:
+                aws:SecureTransport: 'true'
+    - id: iam-access-s3-write
+      title: S3 Write
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:AbortMultipartUpload
+              - s3:ListMultipartUploadParts
+            Resource: arn:aws:s3:::my-app-bucket/uploads/*
+            Condition:
+              Bool:
+                aws:SecureTransport: 'true'
+    - id: iam-access-s3-delete
+      title: S3 Delete
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:DeleteObject
+            Resource: arn:aws:s3:::my-app-bucket/uploads/*
+            Condition:
+              Bool:
+                aws:SecureTransport: 'true'
+    - id: iam-access-efs-read
+      title: EFS Read
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - elasticfilesystem:ClientMount
+            Resource: arn:aws:elasticfilesystem:eu-central-1:111122223333:file-system/fs-0123456789abcdef0
+            Condition:
+              StringEquals:
+                elasticfilesystem:AccessPointArn: arn:aws:elasticfilesystem:eu-central-1:111122223333:access-point/fsap-0123456789abcdef0
+              Bool:
+                aws:SecureTransport: 'true'
+                elasticfilesystem:AccessedViaMountTarget: 'true'
+    - id: iam-access-efs-write
+      title: EFS Write
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - elasticfilesystem:ClientMount
+              - elasticfilesystem:ClientWrite
+            Resource: arn:aws:elasticfilesystem:eu-central-1:111122223333:file-system/fs-0123456789abcdef0
+            Condition:
+              StringEquals:
+                elasticfilesystem:AccessPointArn: arn:aws:elasticfilesystem:eu-central-1:111122223333:access-point/fsap-0123456789abcdef0
+              Bool:
+                aws:SecureTransport: 'true'
+                elasticfilesystem:AccessedViaMountTarget: 'true'
+- id: iam-access-secrets-configuration
+  title: Configuration policies
+  recipes:
+    - id: iam-access-secret-read
+      title: Secrets Manager Read
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+              - secretsmanager:DescribeSecret
+            Resource: arn:aws:secretsmanager:eu-central-1:111122223333:secret:my-app/database-AbCdEf
+    - id: iam-access-secret-write
+      title: Secrets Manager Write
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - secretsmanager:PutSecretValue
+            Resource: arn:aws:secretsmanager:eu-central-1:111122223333:secret:my-app/database-AbCdEf
+    - id: iam-access-ssm-read
+      title: SSM Read
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - ssm:GetParameter
+              - ssm:GetParameters
+            Resource: arn:aws:ssm:eu-central-1:111122223333:parameter/my-app/database
+    - id: iam-access-ssm-write
+      title: SSM Write
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - ssm:PutParameter
+            Resource: arn:aws:ssm:eu-central-1:111122223333:parameter/my-app/database
+    - id: iam-access-kms-decrypt
+      title: KMS Decrypt
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+            Resource: arn:aws:kms:eu-central-1:111122223333:key/12345678-1234-1234-1234-123456789abc
+            Condition:
+              StringEquals:
+                kms:ViaService: s3.eu-central-1.amazonaws.com
+                kms:CallerAccount: '111122223333'
+    - id: iam-access-kms-encrypt
+      title: KMS Encrypt
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:GenerateDataKey
+              - kms:Decrypt
+            Resource: arn:aws:kms:eu-central-1:111122223333:key/12345678-1234-1234-1234-123456789abc
+            Condition:
+              StringEquals:
+                kms:ViaService: s3.eu-central-1.amazonaws.com
+                kms:CallerAccount: '111122223333'
+    - id: iam-access-appconfig-read
+      title: AppConfig
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - appconfig:StartConfigurationSession
+              - appconfig:GetLatestConfiguration
+            Resource: arn:aws:appconfig:eu-central-1:111122223333:application/abc1234/environment/def5678/configuration/ghi1234
+- id: iam-access-messaging
+  title: Messaging policies
+  recipes:
+    - id: iam-access-sqs-send
+      title: SQS Send
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sqs:SendMessage
+              - sqs:GetQueueAttributes
+              - sqs:GetQueueUrl
+            Resource: arn:aws:sqs:eu-central-1:111122223333:my-queue
+    - id: iam-access-sqs-consume
+      title: SQS Consume
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:ChangeMessageVisibility
+              - sqs:GetQueueAttributes
+              - sqs:GetQueueUrl
+            Resource: arn:aws:sqs:eu-central-1:111122223333:my-queue
+    - id: iam-access-sns-publish
+      title: SNS Publish
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sns:Publish
+            Resource: arn:aws:sns:eu-central-1:111122223333:my-topic
+    - id: iam-access-events-put
+      title: EventBridge Publish
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - events:PutEvents
+            Resource: arn:aws:events:eu-central-1:111122223333:event-bus/my-bus
+    - id: iam-access-kinesis-write
+      title: Kinesis Write
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - kinesis:PutRecord
+              - kinesis:PutRecords
+            Resource: arn:aws:kinesis:eu-central-1:111122223333:stream/my-stream
+    - id: iam-access-kinesis-read
+      title: Kinesis Read
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - kinesis:GetRecords
+              - kinesis:GetShardIterator
+              - kinesis:DescribeStream
+              - kinesis:DescribeStreamSummary
+              - kinesis:ListShards
+            Resource: arn:aws:kinesis:eu-central-1:111122223333:stream/my-stream
+    - id: iam-access-firehose-write
+      title: Firehose Write
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - firehose:PutRecord
+              - firehose:PutRecordBatch
+            Resource: arn:aws:firehose:eu-central-1:111122223333:deliverystream/my-stream
+    - id: iam-access-msk-write
+      title: MSK Produce
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - kafka-cluster:Connect
+              - kafka-cluster:WriteDataIdempotently
+            Resource: arn:aws:kafka:eu-central-1:111122223333:cluster/my-cluster/12345678-1234-1234-1234-123456789abc-1
+          - Effect: Allow
+            Action:
+              - kafka-cluster:DescribeTopic
+              - kafka-cluster:WriteData
+            Resource: arn:aws:kafka:eu-central-1:111122223333:topic/my-cluster/12345678-1234-1234-1234-123456789abc-1/my-topic
+    - id: iam-access-msk-read
+      title: MSK Consume
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - kafka-cluster:Connect
+            Resource: arn:aws:kafka:eu-central-1:111122223333:cluster/my-cluster/12345678-1234-1234-1234-123456789abc-1
+          - Effect: Allow
+            Action:
+              - kafka-cluster:DescribeTopic
+              - kafka-cluster:ReadData
+            Resource: arn:aws:kafka:eu-central-1:111122223333:topic/my-cluster/12345678-1234-1234-1234-123456789abc-1/my-topic
+          - Effect: Allow
+            Action:
+              - kafka-cluster:DescribeGroup
+              - kafka-cluster:AlterGroup
+            Resource: arn:aws:kafka:eu-central-1:111122223333:group/my-cluster/12345678-1234-1234-1234-123456789abc-1/my-consumer-group
+- id: iam-access-compute-orchestration
+  title: Compute policies
+  recipes:
+    - id: iam-access-lambda-invoke
+      title: Lambda Invoke
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - lambda:InvokeFunction
+            Resource: arn:aws:lambda:eu-central-1:111122223333:function:my-function:live
+    - id: iam-access-states-start
+      title: Step Functions Start
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - states:StartExecution
+            Resource: arn:aws:states:eu-central-1:111122223333:stateMachine:my-state-machine
+    - id: iam-access-states-sync
+      title: Step Functions Express
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - states:StartSyncExecution
+            Resource: arn:aws:states:eu-central-1:111122223333:stateMachine:my-state-machine
+    - id: iam-access-glue-start
+      title: Glue Jobs
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - glue:StartJobRun
+              - glue:GetJobRun
+              - glue:GetJobRuns
+              - glue:BatchStopJobRun
+            Resource: arn:aws:glue:eu-central-1:111122223333:job/my-job
+    - id: iam-access-ecs-run
+      title: ECS Run Task
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - ecs:RunTask
+            Resource: arn:aws:ecs:eu-central-1:111122223333:task-definition/my-task:1
+            Condition:
+              ArnEquals:
+                ecs:cluster: arn:aws:ecs:eu-central-1:111122223333:cluster/my-cluster
+    - id: iam-access-batch-submit
+      title: Batch Submit Job
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - batch:SubmitJob
+            Resource:
+              - arn:aws:batch:eu-central-1:111122223333:job-queue/my-queue
+              - arn:aws:batch:eu-central-1:111122223333:job-definition/my-job:1
+    - id: iam-access-pass-ecs-role
+      title: IAM PassRole
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource: arn:aws:iam::111122223333:role/my-app-role
+            Condition:
+              StringEquals:
+                iam:PassedToService: ecs-tasks.amazonaws.com
+- id: iam-access-databases
+  title: Database policies
+  recipes:
+    - id: iam-access-dynamodb-read
+      title: DynamoDB Read
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:BatchGetItem
+              - dynamodb:Query
+              - dynamodb:Scan
+              - dynamodb:DescribeTable
+            Resource: arn:aws:dynamodb:eu-central-1:111122223333:table/my-table
+    - id: iam-access-dynamodb-write
+      title: DynamoDB Write
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:PutItem
+              - dynamodb:UpdateItem
+            Resource: arn:aws:dynamodb:eu-central-1:111122223333:table/my-table
+    - id: iam-access-dynamodb-delete
+      title: DynamoDB Delete
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:DeleteItem
+            Resource: arn:aws:dynamodb:eu-central-1:111122223333:table/my-table
+    - id: iam-access-dynamodb-index
+      title: DynamoDB Index Read
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:Query
+              - dynamodb:Scan
+            Resource: arn:aws:dynamodb:eu-central-1:111122223333:table/my-table/index/my-index
+    - id: iam-access-dynamodb-stream
+      title: DynamoDB Streams
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:DescribeStream
+              - dynamodb:GetRecords
+              - dynamodb:GetShardIterator
+            Resource: arn:aws:dynamodb:eu-central-1:111122223333:table/my-table/stream/2026-09-09T00:00:00.000
+          - Effect: Allow
+            Action:
+              - dynamodb:ListStreams
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: eu-central-1
+    - id: iam-access-rds-connect
+      title: RDS IAM
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - rds-db:connect
+            Resource: arn:aws:rds-db:eu-central-1:111122223333:dbuser:db-ABCDEFGHIJKL01234/app_user
+    - id: iam-access-aurora-data
+      title: Aurora Data API
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - rds-data:ExecuteStatement
+              - rds-data:BatchExecuteStatement
+              - rds-data:BeginTransaction
+              - rds-data:CommitTransaction
+              - rds-data:RollbackTransaction
+            Resource: arn:aws:rds:eu-central-1:111122223333:cluster:my-cluster
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: arn:aws:secretsmanager:eu-central-1:111122223333:secret:my-app/database-AbCdEf
+    - id: iam-access-redshift-connect
+      title: Redshift IAM
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - redshift:GetClusterCredentials
+            Resource:
+              - arn:aws:redshift:eu-central-1:111122223333:dbuser:my-warehouse/app_user
+              - arn:aws:redshift:eu-central-1:111122223333:dbname:my-warehouse/my_database
+            Condition:
+              StringEquals:
+                redshift:DbUser: app_user
+                redshift:DbName: my_database
+    - id: iam-access-redshift-data
+      title: Redshift Data API
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - redshift-data:ExecuteStatement
+              - redshift-data:BatchExecuteStatement
+            Resource: arn:aws:redshift:eu-central-1:111122223333:cluster:my-warehouse
+          - Effect: Allow
+            Action:
+              - redshift-data:DescribeStatement
+              - redshift-data:GetStatementResult
+              - redshift-data:CancelStatement
+            Resource: '*'
+            Condition:
+              StringEquals:
+                redshift-data:statement-owner-iam-userid: ${aws:userid}
+                aws:RequestedRegion: eu-central-1
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: arn:aws:secretsmanager:eu-central-1:111122223333:secret:my-app/database-AbCdEf
+    - id: iam-access-redshift-serverless
+      title: Redshift Serverless
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - redshift-serverless:GetCredentials
+              - redshift-data:ExecuteStatement
+              - redshift-data:BatchExecuteStatement
+            Resource: arn:aws:redshift-serverless:eu-central-1:111122223333:workgroup/12345678-1234-1234-1234-123456789abc
+          - Effect: Allow
+            Action:
+              - redshift-data:DescribeStatement
+              - redshift-data:GetStatementResult
+              - redshift-data:CancelStatement
+            Resource: '*'
+            Condition:
+              StringEquals:
+                redshift-data:statement-owner-iam-userid: ${aws:userid}
+                aws:RequestedRegion: eu-central-1
+    - id: iam-access-athena-query
+      title: Athena
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - athena:StartQueryExecution
+              - athena:StopQueryExecution
+              - athena:GetQueryExecution
+              - athena:GetQueryResults
+              - athena:GetWorkGroup
+            Resource: arn:aws:athena:eu-central-1:111122223333:workgroup/my-workgroup
+    - id: iam-access-glue-read
+      title: Glue Catalog
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - glue:GetDatabase
+              - glue:GetTable
+              - glue:GetPartitions
+              - glue:GetPartition
+              - glue:BatchGetPartition
+            Resource:
+              - arn:aws:glue:eu-central-1:111122223333:catalog
+              - arn:aws:glue:eu-central-1:111122223333:database/my_database
+              - arn:aws:glue:eu-central-1:111122223333:table/my_database/my_table
+    - id: iam-access-opensearch-read
+      title: OpenSearch Read
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - es:ESHttpGet
+            Resource:
+              - arn:aws:es:eu-central-1:111122223333:domain/my-domain/my-index/_doc/*
+              - arn:aws:es:eu-central-1:111122223333:domain/my-domain/my-index/_search
+              - arn:aws:es:eu-central-1:111122223333:domain/my-domain/my-index/_count
+              - arn:aws:es:eu-central-1:111122223333:domain/my-domain/my-index/_mapping
+          - Effect: Allow
+            Action:
+              - es:ESHttpPost
+            Resource:
+              - arn:aws:es:eu-central-1:111122223333:domain/my-domain/my-index/_search
+    - id: iam-access-opensearch-write
+      title: OpenSearch Write
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - es:ESHttpPut
+              - es:ESHttpPost
+            Resource:
+              - arn:aws:es:eu-central-1:111122223333:domain/my-domain/my-index/_doc/*
+              - arn:aws:es:eu-central-1:111122223333:domain/my-domain/my-index/_create/*
+              - arn:aws:es:eu-central-1:111122223333:domain/my-domain/my-index/_update/*
+              - arn:aws:es:eu-central-1:111122223333:domain/my-domain/my-index/_doc
+    - id: iam-access-elasticache-connect
+      title: ElastiCache
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - elasticache:Connect
+            Resource:
+              - arn:aws:elasticache:eu-central-1:111122223333:replicationgroup:my-cache
+              - arn:aws:elasticache:eu-central-1:111122223333:user:my-app-user
+    - id: iam-access-neptune-read
+      title: Neptune Read
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - neptune-db:ReadDataViaQuery
+            Resource: arn:aws:neptune-db:eu-central-1:111122223333:cluster-ABCDEFGHIJKL01234/*
+    - id: iam-access-neptune-write
+      title: Neptune Write
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - neptune-db:ReadDataViaQuery
+              - neptune-db:WriteDataViaQuery
+            Resource: arn:aws:neptune-db:eu-central-1:111122223333:cluster-ABCDEFGHIJKL01234/*
+    - id: iam-access-keyspaces-read
+      title: Keyspaces Read
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - cassandra:Select
+            Resource: arn:aws:cassandra:eu-central-1:111122223333:/keyspace/system*
+          - Effect: Allow
+            Action:
+              - cassandra:Select
+            Resource: arn:aws:cassandra:eu-central-1:111122223333:/keyspace/my_keyspace/table/my_table
+    - id: iam-access-keyspaces-write
+      title: Keyspaces Write
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - cassandra:Select
+            Resource: arn:aws:cassandra:eu-central-1:111122223333:/keyspace/system*
+          - Effect: Allow
+            Action:
+              - cassandra:Select
+              - cassandra:Modify
+            Resource: arn:aws:cassandra:eu-central-1:111122223333:/keyspace/my_keyspace/table/my_table
+    - id: iam-access-dsql-connect
+      title: Aurora DSQL
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - dsql:DbConnect
+            Resource: arn:aws:dsql:eu-central-1:111122223333:cluster/abcdefghijklmnopqrstuvwx12
+    - id: iam-access-memorydb-connect
+      title: MemoryDB
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - memorydb:Connect
+            Resource:
+              - arn:aws:memorydb:eu-central-1:111122223333:cluster/my-cluster
+              - arn:aws:memorydb:eu-central-1:111122223333:user/my-app-user
+    - id: iam-access-opensearch-serverless
+      title: OpenSearch Serverless
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - aoss:APIAccessAll
+            Resource: arn:aws:aoss:eu-central-1:111122223333:collection/abcdefghijklmnopqrst
+    - id: iam-access-timestream-read
+      title: Timestream Read
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - timestream:Select
+            Resource: arn:aws:timestream:eu-central-1:111122223333:database/my-database/table/my-table
+          - Effect: Allow
+            Action:
+              - timestream:DescribeEndpoints
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: eu-central-1
+    - id: iam-access-timestream-write
+      title: Timestream Write
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - timestream:WriteRecords
+            Resource: arn:aws:timestream:eu-central-1:111122223333:database/my-database/table/my-table
+          - Effect: Allow
+            Action:
+              - timestream:DescribeEndpoints
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: eu-central-1
+- id: iam-access-images
+  title: ECR policies
+  recipes:
+    - id: iam-access-ecr-pull
+      title: ECR Pull
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - ecr:BatchGetImage
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchCheckLayerAvailability
+            Resource: arn:aws:ecr:eu-central-1:111122223333:repository/my-repository
+          - Effect: Allow
+            Action:
+              - ecr:GetAuthorizationToken
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: eu-central-1
+    - id: iam-access-ecr-push
+      title: ECR Push
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - ecr:BatchCheckLayerAvailability
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+              - ecr:PutImage
+            Resource: arn:aws:ecr:eu-central-1:111122223333:repository/my-repository
+          - Effect: Allow
+            Action:
+              - ecr:GetAuthorizationToken
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: eu-central-1

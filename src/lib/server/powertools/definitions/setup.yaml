@@ -1,0 +1,1652 @@
+- id: setup
+  title: Setup
+  recipes:
+    - id: security-groups-setup
+      title: Security Groups
+      env:
+        - name: VPC_ID
+          example: vpc-0123456789abcdef0
+          required: true
+        - name: SG_NAMES
+          example: app,worker,database
+          required: true
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: security-groups
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          VpcId:
+            Type: AWS::EC2::VPC::Id
+          GroupNames:
+            Type: CommaDelimitedList
+            Default: app,worker,database
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Fn::ForEach::SecurityGroups:
+            - GroupName
+            - Ref: GroupNames
+            - SecurityGroup&{GroupName}:
+                Type: AWS::EC2::SecurityGroup
+                Properties:
+                  VpcId:
+                    Ref: VpcId
+                  GroupName:
+                    Ref: GroupName
+                  GroupDescription: No ingress; outbound HTTP and HTTPS only
+                  SecurityGroupIngress: []
+                  SecurityGroupEgress:
+                    - IpProtocol: tcp
+                      FromPort: 80
+                      ToPort: 80
+                      CidrIp: 0.0.0.0/0
+                    - IpProtocol: tcp
+                      FromPort: 443
+                      ToPort: 443
+                      CidrIp: 0.0.0.0/0
+                  Tags:
+                    - Key:
+                        Ref: TagKey
+                      Value:
+                        Ref: TagValue
+        Transform: AWS::LanguageExtensions
+        Outputs:
+          VpcId:
+            Value:
+              Ref: VpcId
+          GroupNames:
+            Value:
+              Fn::Join:
+                - ','
+                - Ref: GroupNames
+    - id: logging-setup
+      title: Logging
+      env:
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: logging
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          ApiGatewayLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/apigateway
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          VpcFlowLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/vpc-flow
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          TransitFlowLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/transit-flow
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          LambdaLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/lambda
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          EcsLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/ecs
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          BatchLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/batch
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Ec2Logs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/ec2
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          StepFunctionsLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/states
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          CodeBuildLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/codebuild
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          CloudTrailLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/cloudtrail
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          ResolverLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/route53-resolver
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          LatticeLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/vpc-lattice
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          FirewallFlowLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/network-firewall-flow
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          FirewallAlertLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/network-firewall-alert
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          AlbAccessLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/alb-access
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          AlbConnectionLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/alb-connection
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          AlbHealthLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/alb-health
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          NlbLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/nlb
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          CloudFrontLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/cloudfront
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          OpenSearchApplicationLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/opensearch-application
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          OpenSearchSearchLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/opensearch-search
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          OpenSearchIndexLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/opensearch-index
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          OpenSearchAuditLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/opensearch-audit
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          EventBridgeLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/events/${AWS::StackName}
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          EksLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/${AWS::StackName}/eks
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              LogGroupClass: STANDARD
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          VpcFlowLogsRole:
+            Type: AWS::IAM::Role
+            Properties:
+              Description: Delivery role for VPC and Transit Gateway flow logs in this account/region.
+              Path: /service-role/
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: vpc-flow-logs.amazonaws.com
+                    Action: sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Ref: AWS::AccountId
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:vpc-flow-log/*
+              Policies:
+                - PolicyName: Logging
+                  PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Effect: Allow
+                        Action:
+                          - logs:CreateLogStream
+                          - logs:PutLogEvents
+                        Resource:
+                          - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${VpcFlowLogs}:log-stream:*
+                          - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${TransitFlowLogs}:log-stream:*
+                      - Effect: Allow
+                        Action:
+                          - logs:CreateLogGroup
+                          - logs:DescribeLogStreams
+                        Resource:
+                          - Fn::GetAtt:
+                              - VpcFlowLogs
+                              - Arn
+                          - Fn::GetAtt:
+                              - TransitFlowLogs
+                              - Arn
+                      - Effect: Allow
+                        Action: logs:DescribeLogGroups
+                        Resource: '*'
+                        Condition:
+                          StringEquals:
+                            aws:RequestedRegion:
+                              Ref: AWS::Region
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          ApiGatewayLogsRole:
+            Type: AWS::IAM::Role
+            Properties:
+              Description: 'REST / WebSocket: set regional API Gateway account CloudWatch role ARN; enable stage logging separately.'
+              Path: /service-role/
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: apigateway.amazonaws.com
+                    Action: sts:AssumeRole
+              Policies:
+                - PolicyName: Logging
+                  PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Effect: Allow
+                        Action:
+                          - logs:CreateLogStream
+                          - logs:PutLogEvents
+                        Resource:
+                          - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ApiGatewayLogs}:log-stream:*
+                      - Effect: Allow
+                        Action:
+                          - logs:CreateLogGroup
+                          - logs:DescribeLogStreams
+                          - logs:GetLogEvents
+                          - logs:FilterLogEvents
+                        Resource:
+                          - Fn::GetAtt:
+                              - ApiGatewayLogs
+                              - Arn
+                      - Effect: Allow
+                        Action:
+                          - logs:CreateLogGroup
+                          - logs:CreateLogStream
+                          - logs:DescribeLogStreams
+                          - logs:PutLogEvents
+                          - logs:GetLogEvents
+                          - logs:FilterLogEvents
+                        Resource:
+                          Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:API-Gateway-Execution-Logs_*:*
+                      - Effect: Allow
+                        Action: logs:DescribeLogGroups
+                        Resource: '*'
+                        Condition:
+                          StringEquals:
+                            aws:RequestedRegion:
+                              Ref: AWS::Region
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          LambdaLogsRole:
+            Type: AWS::IAM::Role
+            Properties:
+              Description: 'Lambda execution role: custom-group logging only; add application/VPC permissions as required.'
+              Path: /service-role/
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: lambda.amazonaws.com
+                    Action: sts:AssumeRole
+              Policies:
+                - PolicyName: Logging
+                  PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Effect: Allow
+                        Action:
+                          - logs:CreateLogStream
+                          - logs:PutLogEvents
+                        Resource:
+                          - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${LambdaLogs}:log-stream:*
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          EcsExecutionLogsRole:
+            Type: AWS::IAM::Role
+            Properties:
+              Description: 'ECS / Fargate / Batch execution role: logging only; add image-pull and secret permissions as required.'
+              Path: /service-role/
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: ecs-tasks.amazonaws.com
+                    Action: sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Ref: AWS::AccountId
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*
+              Policies:
+                - PolicyName: Logging
+                  PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Effect: Allow
+                        Action:
+                          - logs:CreateLogStream
+                          - logs:PutLogEvents
+                        Resource:
+                          - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${EcsLogs}:log-stream:*
+                          - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${BatchLogs}:log-stream:*
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          StepFunctionsLogsRole:
+            Type: AWS::IAM::Role
+            Properties:
+              Description: 'Step Functions execution role: logging only; add workflow task permissions.'
+              Path: /service-role/
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: states.amazonaws.com
+                    Action: sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Ref: AWS::AccountId
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:*
+              Policies:
+                - PolicyName: Logging
+                  PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Effect: Allow
+                        Action:
+                          - logs:CreateLogStream
+                          - logs:PutLogEvents
+                        Resource:
+                          - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${StepFunctionsLogs}:log-stream:*
+                      - Effect: Allow
+                        Action:
+                          - logs:CreateLogDelivery
+                          - logs:GetLogDelivery
+                          - logs:UpdateLogDelivery
+                          - logs:DeleteLogDelivery
+                          - logs:ListLogDeliveries
+                          - logs:PutResourcePolicy
+                          - logs:DescribeResourcePolicies
+                          - logs:DescribeLogGroups
+                        Resource: '*'
+                        Condition:
+                          StringEquals:
+                            aws:RequestedRegion:
+                              Ref: AWS::Region
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          CodeBuildLogsRole:
+            Type: AWS::IAM::Role
+            Properties:
+              Description: 'CodeBuild service role: logging only; add project source/artifact permissions.'
+              Path: /service-role/
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: codebuild.amazonaws.com
+                    Action: sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Ref: AWS::AccountId
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:codebuild:${AWS::Region}:${AWS::AccountId}:project/*
+              Policies:
+                - PolicyName: Logging
+                  PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Effect: Allow
+                        Action:
+                          - logs:CreateLogStream
+                          - logs:PutLogEvents
+                        Resource:
+                          - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${CodeBuildLogs}:log-stream:*
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          CloudTrailLogsRole:
+            Type: AWS::IAM::Role
+            Properties:
+              Description: CloudTrail CloudWatch delivery role for trails in this account/region.
+              Path: /service-role/
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: cloudtrail.amazonaws.com
+                    Action: sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Ref: AWS::AccountId
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/*
+              Policies:
+                - PolicyName: Logging
+                  PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Effect: Allow
+                        Action:
+                          - logs:CreateLogStream
+                          - logs:PutLogEvents
+                        Resource:
+                          Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${CloudTrailLogs}:log-stream:${AWS::AccountId}_CloudTrail_*
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          ServiceLogPolicy:
+            Type: AWS::Logs::ResourcePolicy
+            Properties:
+              PolicyName:
+                Fn::Sub: ${AWS::StackName}-service-logs
+              PolicyDocument:
+                Fn::Sub: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["logs:CreateLogStream","logs:PutLogEvents"],"Resource":["arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${OpenSearchApplicationLogs}:log-stream:*","arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${OpenSearchSearchLogs}:log-stream:*","arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${OpenSearchIndexLogs}:log-stream:*","arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${OpenSearchAuditLogs}:log-stream:*"],"Principal":{"Service":"es.amazonaws.com"},"Condition":{"StringEquals":{"aws:SourceAccount":"${AWS::AccountId}"},"ArnLike":{"aws:SourceArn":"arn:${AWS::Partition}:es:${AWS::Region}:${AWS::AccountId}:domain/*"}}},{"Effect":"Allow","Action":["logs:CreateLogStream","logs:PutLogEvents"],"Resource":["arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${EventBridgeLogs}:log-stream:*"],"Principal":{"Service":["events.amazonaws.com","delivery.logs.amazonaws.com"]}}]}'
+          AlbAccessLogsDestination:
+            Type: AWS::Logs::DeliveryDestination
+            Properties:
+              Name:
+                Fn::Sub: ${AWS::StackName}-albaccesslogs
+              DestinationResourceArn:
+                Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${AlbAccessLogs}
+              OutputFormat: json
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          AlbConnectionLogsDestination:
+            Type: AWS::Logs::DeliveryDestination
+            Properties:
+              Name:
+                Fn::Sub: ${AWS::StackName}-albconnectionlogs
+              DestinationResourceArn:
+                Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${AlbConnectionLogs}
+              OutputFormat: json
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          AlbHealthLogsDestination:
+            Type: AWS::Logs::DeliveryDestination
+            Properties:
+              Name:
+                Fn::Sub: ${AWS::StackName}-albhealthlogs
+              DestinationResourceArn:
+                Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${AlbHealthLogs}
+              OutputFormat: json
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          NlbLogsDestination:
+            Type: AWS::Logs::DeliveryDestination
+            Properties:
+              Name:
+                Fn::Sub: ${AWS::StackName}-nlblogs
+              DestinationResourceArn:
+                Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${NlbLogs}
+              OutputFormat: json
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          CloudFrontLogsDestination:
+            Type: AWS::Logs::DeliveryDestination
+            Properties:
+              Name:
+                Fn::Sub: ${AWS::StackName}-cloudfrontlogs
+              DestinationResourceArn:
+                Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${CloudFrontLogs}
+              OutputFormat: json
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+        Outputs:
+          ApiGatewayLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ApiGatewayLogs}
+          VpcFlowLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${VpcFlowLogs}
+          TransitFlowLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${TransitFlowLogs}
+          LambdaLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${LambdaLogs}
+          EcsLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${EcsLogs}
+          BatchLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${BatchLogs}
+          Ec2Logs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${Ec2Logs}
+          StepFunctionsLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${StepFunctionsLogs}
+          CodeBuildLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${CodeBuildLogs}
+          CloudTrailLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${CloudTrailLogs}
+          ResolverLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ResolverLogs}
+          LatticeLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${LatticeLogs}
+          FirewallFlowLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${FirewallFlowLogs}
+          FirewallAlertLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${FirewallAlertLogs}
+          AlbAccessLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${AlbAccessLogs}
+          AlbConnectionLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${AlbConnectionLogs}
+          AlbHealthLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${AlbHealthLogs}
+          NlbLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${NlbLogs}
+          CloudFrontLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${CloudFrontLogs}
+          OpenSearchApplicationLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${OpenSearchApplicationLogs}
+          OpenSearchSearchLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${OpenSearchSearchLogs}
+          OpenSearchIndexLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${OpenSearchIndexLogs}
+          OpenSearchAuditLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${OpenSearchAuditLogs}
+          EventBridgeLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${EventBridgeLogs}
+          EksLogs:
+            Value:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${EksLogs}
+          VpcFlowLogsRole:
+            Value:
+              Fn::GetAtt:
+                - VpcFlowLogsRole
+                - Arn
+          ApiGatewayLogsRole:
+            Value:
+              Fn::GetAtt:
+                - ApiGatewayLogsRole
+                - Arn
+          LambdaLogsRole:
+            Value:
+              Fn::GetAtt:
+                - LambdaLogsRole
+                - Arn
+          EcsExecutionLogsRole:
+            Value:
+              Fn::GetAtt:
+                - EcsExecutionLogsRole
+                - Arn
+          StepFunctionsLogsRole:
+            Value:
+              Fn::GetAtt:
+                - StepFunctionsLogsRole
+                - Arn
+          CodeBuildLogsRole:
+            Value:
+              Fn::GetAtt:
+                - CodeBuildLogsRole
+                - Arn
+          CloudTrailLogsRole:
+            Value:
+              Fn::GetAtt:
+                - CloudTrailLogsRole
+                - Arn
+          AlbAccessLogsDestination:
+            Value:
+              Fn::GetAtt:
+                - AlbAccessLogsDestination
+                - Arn
+          AlbConnectionLogsDestination:
+            Value:
+              Fn::GetAtt:
+                - AlbConnectionLogsDestination
+                - Arn
+          AlbHealthLogsDestination:
+            Value:
+              Fn::GetAtt:
+                - AlbHealthLogsDestination
+                - Arn
+          NlbLogsDestination:
+            Value:
+              Fn::GetAtt:
+                - NlbLogsDestination
+                - Arn
+          CloudFrontLogsDestination:
+            Value:
+              Fn::GetAtt:
+                - CloudFrontLogsDestination
+                - Arn
+    - id: waf-setup
+      title: WAF
+      env:
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: waf
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          WebACL:
+            Type: AWS::WAFv2::WebACL
+            Properties:
+              Name:
+                Ref: AWS::StackName
+              Scope: REGIONAL
+              DefaultAction:
+                Allow: {}
+              VisibilityConfig:
+                CloudWatchMetricsEnabled: true
+                SampledRequestsEnabled: false
+                MetricName: AllRequests
+              Rules:
+                - Name: AWSManagedRulesSQLiRuleSet
+                  Priority: 0
+                  Statement:
+                    ManagedRuleGroupStatement:
+                      VendorName: AWS
+                      Name: AWSManagedRulesSQLiRuleSet
+                  OverrideAction:
+                    Count: {}
+                  VisibilityConfig:
+                    CloudWatchMetricsEnabled: true
+                    SampledRequestsEnabled: false
+                    MetricName: AWSManagedRulesSQLiRuleSet
+                - Name: AWSManagedRulesKnownBadInputsRuleSet
+                  Priority: 1
+                  Statement:
+                    ManagedRuleGroupStatement:
+                      VendorName: AWS
+                      Name: AWSManagedRulesKnownBadInputsRuleSet
+                  OverrideAction:
+                    Count: {}
+                  VisibilityConfig:
+                    CloudWatchMetricsEnabled: true
+                    SampledRequestsEnabled: false
+                    MetricName: AWSManagedRulesKnownBadInputsRuleSet
+                - Name: HighRatePerIP
+                  Priority: 10
+                  Action:
+                    Block: {}
+                  Statement:
+                    RateBasedStatement:
+                      Limit: 100000
+                      EvaluationWindowSec: 300
+                      AggregateKeyType: IP
+                  VisibilityConfig:
+                    CloudWatchMetricsEnabled: true
+                    SampledRequestsEnabled: false
+                    MetricName: HighRatePerIP
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          WafLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: aws-waf-logs-${AWS::StackName}
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          WafLogging:
+            Type: AWS::WAFv2::LoggingConfiguration
+            Properties:
+              ResourceArn:
+                Fn::GetAtt:
+                  - WebACL
+                  - Arn
+              LogDestinationConfigs:
+                - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${WafLogs}
+              RedactedFields:
+                - SingleHeader:
+                    Name: authorization
+                - SingleHeader:
+                    Name: cookie
+                - QueryString: {}
+              LoggingFilter:
+                DefaultBehavior: DROP
+                Filters:
+                  - Behavior: KEEP
+                    Requirement: MEETS_ANY
+                    Conditions:
+                      - ActionCondition:
+                          Action: BLOCK
+                      - ActionCondition:
+                          Action: COUNT
+        Outputs:
+          WebACLArn:
+            Value:
+              Fn::GetAtt:
+                - WebACL
+                - Arn
+          RateLimit:
+            Value: 100000
+          ManagedRules:
+            Value: COUNT
+          LogGroup:
+            Value:
+              Ref: WafLogs
+    - id: dlq-setup
+      title: DLQ
+      env:
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: dlq
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          DeadLetterQueue:
+            Type: AWS::SQS::Queue
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              QueueName:
+                Ref: AWS::StackName
+              Tags:
+                - Key: MonitoringRole
+                  Value: dlq
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+              SqsManagedSseEnabled: true
+              MessageRetentionPeriod: 1209600
+              ReceiveMessageWaitTimeSeconds: 20
+              VisibilityTimeout: 60
+              RedriveAllowPolicy:
+                redrivePermission: allowAll
+          QueueTLS:
+            Type: AWS::SQS::QueuePolicy
+            Properties:
+              Queues:
+                - Ref: DeadLetterQueue
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Deny
+                    Principal: '*'
+                    Action: sqs:*
+                    Resource:
+                      Fn::GetAtt:
+                        - DeadLetterQueue
+                        - Arn
+                    Condition:
+                      Bool:
+                        aws:SecureTransport: 'false'
+        Outputs:
+          QueueArn:
+            Value:
+              Fn::GetAtt:
+                - DeadLetterQueue
+                - Arn
+          QueueUrl:
+            Value:
+              Ref: DeadLetterQueue
+          LambdaSendPolicyJSON:
+            Value:
+              Fn::Sub: '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"sqs:SendMessage","Resource":"${DeadLetterQueue.Arn}"}]}'
+          SourceQueueRedrivePolicy:
+            Value:
+              Fn::Sub: '{"deadLetterTargetArn":"${DeadLetterQueue.Arn}","maxReceiveCount":5}'
+    - id: config-setup
+      title: AWS Config
+      env:
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: config
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          ConfigBucket:
+            Type: AWS::S3::Bucket
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              PublicAccessBlockConfiguration:
+                BlockPublicAcls: true
+                BlockPublicPolicy: true
+                IgnorePublicAcls: true
+                RestrictPublicBuckets: true
+              OwnershipControls:
+                Rules:
+                  - ObjectOwnership: BucketOwnerEnforced
+              BucketEncryption:
+                ServerSideEncryptionConfiguration:
+                  - ServerSideEncryptionByDefault:
+                      SSEAlgorithm: AES256
+              VersioningConfiguration:
+                Status: Enabled
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          ConfigBucketPolicy:
+            Type: AWS::S3::BucketPolicy
+            Properties:
+              Bucket:
+                Ref: ConfigBucket
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Deny
+                    Principal: '*'
+                    Action: s3:*
+                    Resource:
+                      - Fn::GetAtt:
+                          - ConfigBucket
+                          - Arn
+                      - Fn::Sub: ${ConfigBucket.Arn}/*
+                    Condition:
+                      Bool:
+                        aws:SecureTransport: 'false'
+                  - Effect: Allow
+                    Action:
+                      - s3:GetBucketAcl
+                      - s3:ListBucket
+                    Resource:
+                      Fn::GetAtt:
+                        - ConfigBucket
+                        - Arn
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Ref: AWS::AccountId
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:config:${AWS::Region}:${AWS::AccountId}:*
+                    Principal:
+                      Service: config.amazonaws.com
+                  - Effect: Allow
+                    Action: s3:PutObject
+                    Resource:
+                      Fn::Sub: ${ConfigBucket.Arn}/AWSLogs/${AWS::AccountId}/Config/*
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Ref: AWS::AccountId
+                        s3:x-amz-acl: bucket-owner-full-control
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:config:${AWS::Region}:${AWS::AccountId}:*
+                    Principal:
+                      Service: config.amazonaws.com
+          ConfigRole:
+            Type: AWS::IAM::Role
+            Properties:
+              Description: AWS Config resource inventory and delivery to this stack bucket.
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: config.amazonaws.com
+                    Action: sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Ref: AWS::AccountId
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:config:${AWS::Region}:${AWS::AccountId}:*
+              ManagedPolicyArns:
+                - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWS_ConfigRole
+              Policies:
+                - PolicyName: ConfigDelivery
+                  PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Effect: Allow
+                        Action:
+                          - s3:GetBucketAcl
+                          - s3:ListBucket
+                        Resource:
+                          Fn::GetAtt:
+                            - ConfigBucket
+                            - Arn
+                      - Effect: Allow
+                        Action: s3:PutObject
+                        Resource:
+                          Fn::Sub: ${ConfigBucket.Arn}/AWSLogs/${AWS::AccountId}/Config/*
+                        Condition:
+                          StringEquals:
+                            s3:x-amz-acl: bucket-owner-full-control
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          ConfigurationRecorder:
+            Type: AWS::Config::ConfigurationRecorder
+            Properties:
+              Name:
+                Ref: AWS::StackName
+              RoleARN:
+                Fn::GetAtt:
+                  - ConfigRole
+                  - Arn
+              RecordingGroup:
+                AllSupported: true
+                IncludeGlobalResourceTypes: true
+              RecordingMode:
+                RecordingFrequency: CONTINUOUS
+          DeliveryChannel:
+            Type: AWS::Config::DeliveryChannel
+            DependsOn:
+              - ConfigurationRecorder
+              - ConfigBucketPolicy
+            Properties:
+              Name:
+                Ref: AWS::StackName
+              S3BucketName:
+                Ref: ConfigBucket
+              ConfigSnapshotDeliveryProperties:
+                DeliveryFrequency: TwentyFour_Hours
+        Outputs:
+          RecorderName:
+            Value:
+              Ref: ConfigurationRecorder
+          DeliveryBucket:
+            Value:
+              Ref: ConfigBucket
+          RecorderRole:
+            Value:
+              Fn::GetAtt:
+                - ConfigRole
+                - Arn
+          Recording:
+            Value:
+              Ref: AWS::Region
+    - id: alarms-setup
+      title: Alarms
+      env:
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: alarms
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          CollectorLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/lambda/${AWS::StackName}-collector
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          CollectorRole:
+            Type: AWS::IAM::Role
+            Properties:
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: lambda.amazonaws.com
+                    Action: sts:AssumeRole
+              Policies:
+                - PolicyName: DiscoverAndMeasure
+                  PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Effect: Allow
+                        Action:
+                          - logs:CreateLogStream
+                          - logs:PutLogEvents
+                        Resource:
+                          Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${CollectorLogs}:log-stream:*
+                      - Effect: Allow
+                        Action: cloudwatch:PutMetricData
+                        Resource: '*'
+                        Condition:
+                          StringEquals:
+                            cloudwatch:namespace: Powertools/Health
+                            aws:RequestedRegion:
+                              Ref: AWS::Region
+                      - Effect: Allow
+                        Action:
+                          - cloudwatch:GetMetricData
+                          - lambda:ListFunctions
+                          - lambda:ListEventSourceMappings
+                          - sqs:ListQueues
+                          - sns:ListSubscriptions
+                          - sns:GetSubscriptionAttributes
+                          - events:ListEventBuses
+                          - events:ListRules
+                          - scheduler:ListSchedules
+                        Resource: '*'
+                        Condition:
+                          StringEquals:
+                            aws:RequestedRegion:
+                              Ref: AWS::Region
+                      - Effect: Allow
+                        Action:
+                          - sqs:GetQueueAttributes
+                          - sqs:ListQueueTags
+                        Resource:
+                          Fn::Sub: arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:*
+                      - Effect: Allow
+                        Action: lambda:ListFunctionEventInvokeConfigs
+                        Resource:
+                          Fn::Sub: arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:*
+                      - Effect: Allow
+                        Action: events:DescribeEventBus
+                        Resource:
+                          Fn::Sub: arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/*
+                      - Effect: Allow
+                        Action: events:ListTargetsByRule
+                        Resource:
+                          Fn::Sub: arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/*
+                      - Effect: Allow
+                        Action: scheduler:GetSchedule
+                        Resource:
+                          Fn::Sub: arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/*
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Collector:
+            Type: AWS::Lambda::Function
+            Properties:
+              FunctionName:
+                Fn::Sub: ${AWS::StackName}-collector
+              Runtime: nodejs24.x
+              Handler: index.handler
+              Role:
+                Fn::GetAtt:
+                  - CollectorRole
+                  - Arn
+              Timeout: 240
+              MemorySize: 256
+              ReservedConcurrentExecutions: 1
+              Code:
+                ZipFile: |
+                  const modules={sqs:require('@aws-sdk/client-sqs'),lambda:require('@aws-sdk/client-lambda'),sns:require('@aws-sdk/client-sns'),events:require('@aws-sdk/client-eventbridge'),scheduler:require('@aws-sdk/client-scheduler'),cloudwatch:require('@aws-sdk/client-cloudwatch')};
+                  const classes={sqs:'SQSClient',lambda:'LambdaClient',sns:'SNSClient',events:'EventBridgeClient',scheduler:'SchedulerClient',cloudwatch:'CloudWatchClient'};
+                  const clients=Object.fromEntries(Object.entries(classes).map(([k,v])=>[k,new modules[k][v]({maxAttempts:5})]));
+                  const call=(s,op,p={})=>clients[s].send(new modules[s][op+'Command'](p));
+                  async function pages(s,op,key,p={}){const all=[];let token;do{const result=await call(s,op,{...p,...(token?{[s==='lambda'?'Marker':'NextToken']:token}:{})});all.push(...(result[key]||[]));token=result.NextToken||result.NextMarker;}while(token);return all;}
+                  async function parallel(items,fn){let next=0;const results=new Array(items.length);await Promise.all(Array.from({length:Math.min(8,items.length)},async()=>{while(next<items.length){const i=next++;results[i]=await fn(items[i]);}}));return results;}
+                  const missing=e=>['ResourceNotFoundException','NotFound','NotFoundException','AWS.SimpleQueueService.NonExistentQueue','QueueDoesNotExist'].includes(e.name);
+                  async function tolerate(fn,fallback){try{return await fn();}catch(e){if(missing(e))return fallback;throw e;}}
+                  async function discover(){
+                   const queues=new Map(),targets=new Set(),functions=new Set();
+                   const infos=await parallel(await pages('sqs','ListQueues','QueueUrls',{MaxResults:1000}),url=>tolerate(async()=>{const {Attributes:a}=await call('sqs','GetQueueAttributes',{QueueUrl:url,AttributeNames:['QueueArn','RedrivePolicy','ApproximateNumberOfMessagesVisible','ApproximateNumberOfMessagesNotVisible','ApproximateNumberOfMessagesDelayed']});const {Tags:t={}}=await call('sqs','ListQueueTags',{QueueUrl:url});return {a,t};},null));
+                   for(const info of infos){if(!info)continue;const {a,t}=info;queues.set(a.QueueArn,a);targets.add(JSON.parse(a.RedrivePolicy||'{}').deadLetterTargetArn);if((t.MonitoringRole||'').toLowerCase()==='dlq')targets.add(a.QueueArn);}
+                   for(const f of await pages('lambda','ListFunctions','Functions',{FunctionVersion:'ALL'})){functions.add(f.FunctionName);targets.add(f.DeadLetterConfig?.TargetArn);}
+                   await parallel([...functions],name=>tolerate(async()=>{for(const c of await pages('lambda','ListFunctionEventInvokeConfigs','FunctionEventInvokeConfigs',{FunctionName:name}))targets.add(c.DestinationConfig?.OnFailure?.Destination);},null));
+                   for(const m of await pages('lambda','ListEventSourceMappings','EventSourceMappings'))targets.add(m.DestinationConfig?.OnFailure?.Destination);
+                   await parallel(await pages('sns','ListSubscriptions','Subscriptions'),s=>tolerate(async()=>{if(!s.SubscriptionArn.startsWith('arn:'))return;const {Attributes:a}=await call('sns','GetSubscriptionAttributes',{SubscriptionArn:s.SubscriptionArn});targets.add(JSON.parse(a.RedrivePolicy||'{}').deadLetterTargetArn);},null));
+                   await parallel(await pages('events','ListEventBuses','EventBuses'),b=>tolerate(async()=>{targets.add((await call('events','DescribeEventBus',{Name:b.Name})).DeadLetterConfig?.Arn);for(const r of await pages('events','ListRules','Rules',{EventBusName:b.Name}))for(const t of await pages('events','ListTargetsByRule','Targets',{EventBusName:b.Name,Rule:r.Name}))targets.add(t.DeadLetterConfig?.Arn);},null));
+                   await parallel(await pages('scheduler','ListSchedules','Schedules'),s=>tolerate(async()=>{targets.add((await call('scheduler','GetSchedule',{Name:s.Name,GroupName:s.GroupName})).Target?.DeadLetterConfig?.Arn);},null));
+                   const prefix=`arn:${process.env.PARTITION}:sqs:${process.env.AWS_REGION}:${process.env.ACCOUNT_ID}:`;
+                   const dlqs=new Map();for(const a of targets){if(!a?.startsWith(prefix))continue;if(!queues.has(a))throw Error('DLQ missing from complete queue scan: '+a);dlqs.set(a,queues.get(a));}return {dlqs,functions:[...functions].sort()};
+                  }
+                  async function rates(functions,now){const results=[];const end=new Date(Math.floor(now.getTime()/60000)*60000-120000),start=new Date(end.getTime()-300000);
+                   for(let offset=0;offset<functions.length;offset+=200){const batch=functions.slice(offset,offset+200),queries=[];for(const [i,name]of batch.entries())for(const [suffix,metric]of [['e','Errors'],['i','Invocations']])queries.push({Id:'f'+i+suffix,MetricStat:{Metric:{Namespace:'AWS/Lambda',MetricName:metric,Dimensions:[{Name:'FunctionName',Value:name}]},Period:60,Stat:'Sum'},ReturnData:true});
+                   const samples=new Map(queries.map(q=>[q.Id,new Map()])),seen=new Set();let token;do{const response=await call('cloudwatch','GetMetricData',{MetricDataQueries:queries,StartTime:start,EndTime:end,...(token?{NextToken:token}:{})});for(const r of response.MetricDataResults||[]){if(!['Complete','PartialData'].includes(r.StatusCode)||(r.StatusCode==='PartialData'&&!response.NextToken))throw Error('Incomplete metric data');seen.add(r.Id);r.Timestamps.forEach((t,i)=>samples.get(r.Id).set(new Date(t).getTime(),r.Values[i]));}token=response.NextToken;}while(token);
+                   if(seen.size!==samples.size)throw Error('Missing metric query results');for(const [i,name]of batch.entries()){const es=samples.get('f'+i+'e'),is=samples.get('f'+i+'i');let worst=0;for(const t of new Set([...es.keys(),...is.keys()])){const count=Math.max(is.get(t)||0,es.get(t)||0);if(count>=Number(process.env.MIN_INVOCATIONS||1))worst=Math.max(worst,100*(es.get(t)||0)/count);}results.push([name,worst]);}
+                   }return results;
+                  }
+                  exports.handler=async()=>{const now=new Date(),{dlqs,functions}=await discover(),values=await rates(functions,now);let depth=0;for(const a of dlqs.values())for(const key of ['ApproximateNumberOfMessagesVisible','ApproximateNumberOfMessagesNotVisible','ApproximateNumberOfMessagesDelayed'])depth+=Number(a[key]||0);const worst=Math.max(0,...values.map(x=>x[1]));await call('cloudwatch','PutMetricData',{Namespace:'Powertools/Health',MetricData:[['DLQDepth',depth,'Count'],['WorstLambdaErrorRate',worst,'Percent']].map(([MetricName,Value,Unit])=>({MetricName,Value,Unit,Timestamp:now,Dimensions:[{Name:'Monitor',Value:process.env.MONITOR}]}))});const result={dlqCount:dlqs.size,lambdaCount:functions.length,depth,worstErrorRate:worst};console.log(JSON.stringify(result));return result;};
+              Environment:
+                Variables:
+                  ACCOUNT_ID:
+                    Ref: AWS::AccountId
+                  PARTITION:
+                    Ref: AWS::Partition
+                  MONITOR:
+                    Ref: AWS::StackName
+                  MIN_INVOCATIONS: '1'
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          CollectorInvokeConfig:
+            Type: AWS::Lambda::EventInvokeConfig
+            Properties:
+              FunctionName:
+                Ref: Collector
+              Qualifier: $LATEST
+              MaximumRetryAttempts: 0
+              MaximumEventAgeInSeconds: 240
+          Poll:
+            Type: AWS::Events::Rule
+            Properties:
+              ScheduleExpression: rate(5 minutes)
+              State: ENABLED
+              Targets:
+                - Id: Collector
+                  Arn:
+                    Fn::GetAtt:
+                      - Collector
+                      - Arn
+                  RetryPolicy:
+                    MaximumEventAgeInSeconds: 240
+                    MaximumRetryAttempts: 0
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          InvokeCollector:
+            Type: AWS::Lambda::Permission
+            Properties:
+              Action: lambda:InvokeFunction
+              FunctionName:
+                Ref: Collector
+              Principal: events.amazonaws.com
+              SourceArn:
+                Fn::GetAtt:
+                  - Poll
+                  - Arn
+              SourceAccount:
+                Ref: AWS::AccountId
+          Notifications:
+            Type: AWS::SNS::Topic
+            Properties:
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          NotificationPolicy:
+            Type: AWS::SNS::TopicPolicy
+            Properties:
+              Topics:
+                - Ref: Notifications
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action: sns:Publish
+                    Resource:
+                      Ref: Notifications
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Ref: AWS::AccountId
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:${AWS::StackName}-*
+                    Principal:
+                      Service: cloudwatch.amazonaws.com
+          DLQDepthAlarm:
+            Type: AWS::CloudWatch::Alarm
+            Properties:
+              Namespace: Powertools/Health
+              MetricName: DLQDepth
+              Unit: Count
+              Dimensions:
+                - Name: Monitor
+                  Value:
+                    Ref: AWS::StackName
+              Statistic: Maximum
+              Period: 300
+              EvaluationPeriods: 1
+              DatapointsToAlarm: 1
+              TreatMissingData: breaching
+              AlarmActions:
+                - Ref: Notifications
+              OKActions:
+                - Ref: Notifications
+              ComparisonOperator: GreaterThanOrEqualToThreshold
+              AlarmName:
+                Fn::Sub: ${AWS::StackName}-all-dlq-depth
+              Threshold: 1
+              AlarmDescription: Any waiting/in-flight/delayed messages in regional SQS DLQs referenced by SQS, Lambda, SNS or EventBridge (including Scheduler), or tagged MonitoringRole=dlq. Missing collector data also alarms; inspect collector logs.
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          LambdaErrorRateAlarm:
+            Type: AWS::CloudWatch::Alarm
+            Properties:
+              Namespace: Powertools/Health
+              MetricName: WorstLambdaErrorRate
+              Unit: Percent
+              Dimensions:
+                - Name: Monitor
+                  Value:
+                    Ref: AWS::StackName
+              Statistic: Maximum
+              Period: 300
+              EvaluationPeriods: 1
+              DatapointsToAlarm: 1
+              TreatMissingData: breaching
+              AlarmActions:
+                - Ref: Notifications
+              OKActions:
+                - Ref: Notifications
+              ComparisonOperator: GreaterThanOrEqualToThreshold
+              AlarmName:
+                Fn::Sub: ${AWS::StackName}-all-lambda-error-rate
+              Threshold: 1
+              AlarmDescription: Highest per-function Errors/Invocations percentage in any five-minute bucket in the last 20 minutes, including new functions. MinInvocations applies per bucket. Missing collector data also alarms. Throttles and application-returned HTTP errors are separate from Lambda Errors.
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+        Outputs:
+          DLQAlarm:
+            Value:
+              Ref: DLQDepthAlarm
+          LambdaAlarm:
+            Value:
+              Ref: LambdaErrorRateAlarm
+          NotificationTopic:
+            Value:
+              Ref: Notifications
+          CollectorLogs:
+            Value:
+              Ref: CollectorLogs
+          ExtraDLQs:
+            Value: MonitoringRole=dlq

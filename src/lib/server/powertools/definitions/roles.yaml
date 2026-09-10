@@ -1,0 +1,1294 @@
+- id: iam-roles
+  title: Roles
+  recipes:
+    - id: iam-role-lambda
+      title: Lambda VPC
+      env:
+        - name: ROLE_NAME
+          example: my-app-role
+          required: true
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: role-lambda
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          RoleName:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Role:
+            Type: AWS::IAM::Role
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              RoleName:
+                Ref: RoleName
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: lambda.amazonaws.com
+                    Action:
+                      - sts:AssumeRole
+              ManagedPolicyArns:
+                - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Permissions:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              ManagedPolicyName:
+                Fn::Sub: ${RoleName}-permissions
+              Path: /powertools/
+              Description: Application permissions for this role.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Sid: EmptyPermissions
+                    Effect: Deny
+                    NotAction: '*'
+                    Resource: '*'
+              Roles:
+                - Ref: Role
+        Outputs:
+          RoleArn:
+            Value:
+              Fn::GetAtt:
+                - Role
+                - Arn
+          PolicyArn:
+            Value:
+              Ref: Permissions
+    - id: iam-role-lambda-basic
+      title: Lambda
+      env:
+        - name: ROLE_NAME
+          example: my-app-role
+          required: true
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: role-lambda-basic
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          RoleName:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Role:
+            Type: AWS::IAM::Role
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              RoleName:
+                Ref: RoleName
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: lambda.amazonaws.com
+                    Action:
+                      - sts:AssumeRole
+              ManagedPolicyArns:
+                - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Permissions:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              ManagedPolicyName:
+                Fn::Sub: ${RoleName}-permissions
+              Path: /powertools/
+              Description: Application permissions for this role.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Sid: EmptyPermissions
+                    Effect: Deny
+                    NotAction: '*'
+                    Resource: '*'
+              Roles:
+                - Ref: Role
+        Outputs:
+          RoleArn:
+            Value:
+              Fn::GetAtt:
+                - Role
+                - Arn
+          PolicyArn:
+            Value:
+              Ref: Permissions
+    - id: iam-role-step-functions
+      title: Step Functions
+      env:
+        - name: ROLE_NAME
+          example: my-app-role
+          required: true
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: role-step-functions
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          RoleName:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Role:
+            Type: AWS::IAM::Role
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              RoleName:
+                Ref: RoleName
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: states.amazonaws.com
+                    Action:
+                      - sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Fn::Sub: ${AWS::AccountId}
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:*
+              ManagedPolicyArns: []
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Permissions:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              ManagedPolicyName:
+                Fn::Sub: ${RoleName}-permissions
+              Path: /powertools/
+              Description: Application permissions for this role.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Sid: EmptyPermissions
+                    Effect: Deny
+                    NotAction: '*'
+                    Resource: '*'
+              Roles:
+                - Ref: Role
+        Outputs:
+          RoleArn:
+            Value:
+              Fn::GetAtt:
+                - Role
+                - Arn
+          PolicyArn:
+            Value:
+              Ref: Permissions
+    - id: iam-role-ecs-execution
+      title: ECS Execution
+      env:
+        - name: ROLE_NAME
+          example: my-app-role
+          required: true
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: role-ecs-execution
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          RoleName:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Role:
+            Type: AWS::IAM::Role
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              RoleName:
+                Ref: RoleName
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: ecs-tasks.amazonaws.com
+                    Action:
+                      - sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Fn::Sub: ${AWS::AccountId}
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*
+              ManagedPolicyArns:
+                - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Permissions:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              ManagedPolicyName:
+                Fn::Sub: ${RoleName}-permissions
+              Path: /powertools/
+              Description: Application permissions for this role.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Sid: EmptyPermissions
+                    Effect: Deny
+                    NotAction: '*'
+                    Resource: '*'
+              Roles:
+                - Ref: Role
+        Outputs:
+          RoleArn:
+            Value:
+              Fn::GetAtt:
+                - Role
+                - Arn
+          PolicyArn:
+            Value:
+              Ref: Permissions
+    - id: iam-role-ecs-task
+      title: ECS Task
+      env:
+        - name: ROLE_NAME
+          example: my-app-role
+          required: true
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: role-ecs-task
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          RoleName:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Role:
+            Type: AWS::IAM::Role
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              RoleName:
+                Ref: RoleName
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: ecs-tasks.amazonaws.com
+                    Action:
+                      - sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Fn::Sub: ${AWS::AccountId}
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*
+              ManagedPolicyArns: []
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Permissions:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              ManagedPolicyName:
+                Fn::Sub: ${RoleName}-permissions
+              Path: /powertools/
+              Description: Application permissions for this role.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Sid: EmptyPermissions
+                    Effect: Deny
+                    NotAction: '*'
+                    Resource: '*'
+              Roles:
+                - Ref: Role
+        Outputs:
+          RoleArn:
+            Value:
+              Fn::GetAtt:
+                - Role
+                - Arn
+          PolicyArn:
+            Value:
+              Ref: Permissions
+    - id: iam-role-ecs-instance
+      title: ECS Instance
+      env:
+        - name: ROLE_NAME
+          example: my-app-role
+          required: true
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: role-ecs-instance
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          RoleName:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Role:
+            Type: AWS::IAM::Role
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              RoleName:
+                Ref: RoleName
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: ec2.amazonaws.com
+                    Action:
+                      - sts:AssumeRole
+              ManagedPolicyArns:
+                - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+                - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Permissions:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              ManagedPolicyName:
+                Fn::Sub: ${RoleName}-permissions
+              Path: /powertools/
+              Description: Application permissions for this role.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Sid: EmptyPermissions
+                    Effect: Deny
+                    NotAction: '*'
+                    Resource: '*'
+              Roles:
+                - Ref: Role
+          Profile:
+            Type: AWS::IAM::InstanceProfile
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              InstanceProfileName:
+                Ref: RoleName
+              Roles:
+                - Ref: Role
+        Outputs:
+          RoleArn:
+            Value:
+              Fn::GetAtt:
+                - Role
+                - Arn
+          PolicyArn:
+            Value:
+              Ref: Permissions
+    - id: iam-role-batch-job
+      title: Batch
+      env:
+        - name: ROLE_NAME
+          example: my-app-role
+          required: true
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: role-batch-job
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          RoleName:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Role:
+            Type: AWS::IAM::Role
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              RoleName:
+                Ref: RoleName
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: ecs-tasks.amazonaws.com
+                    Action:
+                      - sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Fn::Sub: ${AWS::AccountId}
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*
+              ManagedPolicyArns: []
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Permissions:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              ManagedPolicyName:
+                Fn::Sub: ${RoleName}-permissions
+              Path: /powertools/
+              Description: Application permissions for this role.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Sid: EmptyPermissions
+                    Effect: Deny
+                    NotAction: '*'
+                    Resource: '*'
+              Roles:
+                - Ref: Role
+        Outputs:
+          RoleArn:
+            Value:
+              Fn::GetAtt:
+                - Role
+                - Arn
+          PolicyArn:
+            Value:
+              Ref: Permissions
+    - id: iam-role-eks-cluster
+      title: EKS Cluster
+      env:
+        - name: ROLE_NAME
+          example: my-app-role
+          required: true
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: role-eks-cluster
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          RoleName:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Role:
+            Type: AWS::IAM::Role
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              RoleName:
+                Ref: RoleName
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: eks.amazonaws.com
+                    Action:
+                      - sts:AssumeRole
+              ManagedPolicyArns:
+                - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonEKSClusterPolicy
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Permissions:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              ManagedPolicyName:
+                Fn::Sub: ${RoleName}-permissions
+              Path: /powertools/
+              Description: Application permissions for this role.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Sid: EmptyPermissions
+                    Effect: Deny
+                    NotAction: '*'
+                    Resource: '*'
+              Roles:
+                - Ref: Role
+        Outputs:
+          RoleArn:
+            Value:
+              Fn::GetAtt:
+                - Role
+                - Arn
+          PolicyArn:
+            Value:
+              Ref: Permissions
+    - id: iam-role-eks-node
+      title: EKS Node
+      env:
+        - name: ROLE_NAME
+          example: my-app-role
+          required: true
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: role-eks-node
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          RoleName:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Role:
+            Type: AWS::IAM::Role
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              RoleName:
+                Ref: RoleName
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: ec2.amazonaws.com
+                    Action:
+                      - sts:AssumeRole
+              ManagedPolicyArns:
+                - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonEKSWorkerNodePolicy
+                - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Permissions:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              ManagedPolicyName:
+                Fn::Sub: ${RoleName}-permissions
+              Path: /powertools/
+              Description: Application permissions for this role.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Sid: EmptyPermissions
+                    Effect: Deny
+                    NotAction: '*'
+                    Resource: '*'
+              Roles:
+                - Ref: Role
+          Profile:
+            Type: AWS::IAM::InstanceProfile
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              InstanceProfileName:
+                Ref: RoleName
+              Roles:
+                - Ref: Role
+        Outputs:
+          RoleArn:
+            Value:
+              Fn::GetAtt:
+                - Role
+                - Arn
+          PolicyArn:
+            Value:
+              Ref: Permissions
+    - id: iam-role-eks-fargate
+      title: EKS Fargate
+      env:
+        - name: ROLE_NAME
+          example: my-app-role
+          required: true
+        - name: CLUSTER_NAME
+          example: my-cluster
+          required: true
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: role-eks-fargate
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          RoleName:
+            Type: String
+          ClusterName:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Role:
+            Type: AWS::IAM::Role
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              RoleName:
+                Ref: RoleName
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: eks-fargate-pods.amazonaws.com
+                    Action:
+                      - sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Fn::Sub: ${AWS::AccountId}
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:fargateprofile/${ClusterName}/*
+              ManagedPolicyArns:
+                - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonEKSFargatePodExecutionRolePolicy
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Permissions:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              ManagedPolicyName:
+                Fn::Sub: ${RoleName}-permissions
+              Path: /powertools/
+              Description: Application permissions for this role.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Sid: EmptyPermissions
+                    Effect: Deny
+                    NotAction: '*'
+                    Resource: '*'
+              Roles:
+                - Ref: Role
+        Outputs:
+          RoleArn:
+            Value:
+              Fn::GetAtt:
+                - Role
+                - Arn
+          PolicyArn:
+            Value:
+              Ref: Permissions
+    - id: iam-role-eks-pod
+      title: EKS Pod Identity
+      env:
+        - name: ROLE_NAME
+          example: my-app-role
+          required: true
+        - name: CLUSTER_NAME
+          example: my-cluster
+          required: true
+        - name: NAMESPACE
+          example: app
+          required: true
+        - name: SERVICE_ACCOUNT
+          example: worker
+          required: true
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: role-eks-pod
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          RoleName:
+            Type: String
+          ClusterName:
+            Type: String
+          Namespace:
+            Type: String
+          ServiceAccount:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Role:
+            Type: AWS::IAM::Role
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              RoleName:
+                Ref: RoleName
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: pods.eks.amazonaws.com
+                    Action:
+                      - sts:AssumeRole
+                      - sts:TagSession
+                    Condition:
+                      StringEquals:
+                        aws:RequestTag/eks-cluster-arn:
+                          Fn::Sub: arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}
+                        aws:RequestTag/kubernetes-namespace:
+                          Fn::Sub: ${Namespace}
+                        aws:RequestTag/kubernetes-service-account:
+                          Fn::Sub: ${ServiceAccount}
+              ManagedPolicyArns: []
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Permissions:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              ManagedPolicyName:
+                Fn::Sub: ${RoleName}-permissions
+              Path: /powertools/
+              Description: Application permissions for this role.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Sid: EmptyPermissions
+                    Effect: Deny
+                    NotAction: '*'
+                    Resource: '*'
+              Roles:
+                - Ref: Role
+        Outputs:
+          RoleArn:
+            Value:
+              Fn::GetAtt:
+                - Role
+                - Arn
+          PolicyArn:
+            Value:
+              Ref: Permissions
+    - id: iam-role-ec2
+      title: EC2
+      env:
+        - name: ROLE_NAME
+          example: my-app-role
+          required: true
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: role-ec2
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          RoleName:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Role:
+            Type: AWS::IAM::Role
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              RoleName:
+                Ref: RoleName
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: ec2.amazonaws.com
+                    Action:
+                      - sts:AssumeRole
+              ManagedPolicyArns:
+                - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Permissions:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              ManagedPolicyName:
+                Fn::Sub: ${RoleName}-permissions
+              Path: /powertools/
+              Description: Application permissions for this role.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Sid: EmptyPermissions
+                    Effect: Deny
+                    NotAction: '*'
+                    Resource: '*'
+              Roles:
+                - Ref: Role
+          Profile:
+            Type: AWS::IAM::InstanceProfile
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              InstanceProfileName:
+                Ref: RoleName
+              Roles:
+                - Ref: Role
+        Outputs:
+          RoleArn:
+            Value:
+              Fn::GetAtt:
+                - Role
+                - Arn
+          PolicyArn:
+            Value:
+              Ref: Permissions
+    - id: iam-role-eventbridge
+      title: EventBridge
+      env:
+        - name: ROLE_NAME
+          example: my-app-role
+          required: true
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: role-eventbridge
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          RoleName:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Role:
+            Type: AWS::IAM::Role
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              RoleName:
+                Ref: RoleName
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: events.amazonaws.com
+                    Action:
+                      - sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Fn::Sub: ${AWS::AccountId}
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/*
+              ManagedPolicyArns: []
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Permissions:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              ManagedPolicyName:
+                Fn::Sub: ${RoleName}-permissions
+              Path: /powertools/
+              Description: Application permissions for this role.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Sid: EmptyPermissions
+                    Effect: Deny
+                    NotAction: '*'
+                    Resource: '*'
+              Roles:
+                - Ref: Role
+        Outputs:
+          RoleArn:
+            Value:
+              Fn::GetAtt:
+                - Role
+                - Arn
+          PolicyArn:
+            Value:
+              Ref: Permissions
+    - id: iam-role-scheduler
+      title: EventBridge Scheduler
+      env:
+        - name: ROLE_NAME
+          example: my-app-role
+          required: true
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: role-scheduler
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          RoleName:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Role:
+            Type: AWS::IAM::Role
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              RoleName:
+                Ref: RoleName
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: scheduler.amazonaws.com
+                    Action:
+                      - sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Fn::Sub: ${AWS::AccountId}
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule-group/*
+              ManagedPolicyArns: []
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Permissions:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              ManagedPolicyName:
+                Fn::Sub: ${RoleName}-permissions
+              Path: /powertools/
+              Description: Application permissions for this role.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Sid: EmptyPermissions
+                    Effect: Deny
+                    NotAction: '*'
+                    Resource: '*'
+              Roles:
+                - Ref: Role
+        Outputs:
+          RoleArn:
+            Value:
+              Fn::GetAtt:
+                - Role
+                - Arn
+          PolicyArn:
+            Value:
+              Ref: Permissions
+    - id: iam-role-flow-logs
+      title: VPC Flow Logs
+      env:
+        - name: ROLE_NAME
+          example: my-app-role
+          required: true
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: role-flow-logs
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          RoleName:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Role:
+            Type: AWS::IAM::Role
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              RoleName:
+                Ref: RoleName
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: vpc-flow-logs.amazonaws.com
+                    Action:
+                      - sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Fn::Sub: ${AWS::AccountId}
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:vpc-flow-log/*
+              ManagedPolicyArns: []
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Permissions:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              ManagedPolicyName:
+                Fn::Sub: ${RoleName}-permissions
+              Path: /powertools/
+              Description: Application permissions for this role.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Sid: EmptyPermissions
+                    Effect: Deny
+                    NotAction: '*'
+                    Resource: '*'
+              Roles:
+                - Ref: Role
+        Outputs:
+          RoleArn:
+            Value:
+              Fn::GetAtt:
+                - Role
+                - Arn
+          PolicyArn:
+            Value:
+              Ref: Permissions
+    - id: iam-role-api-gateway
+      title: API Gateway
+      env:
+        - name: ROLE_NAME
+          example: my-app-role
+          required: true
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: role-api-gateway
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Parameters:
+          RoleName:
+            Type: String
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Role:
+            Type: AWS::IAM::Role
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              RoleName:
+                Ref: RoleName
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: apigateway.amazonaws.com
+                    Action:
+                      - sts:AssumeRole
+              ManagedPolicyArns:
+                - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Permissions:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              ManagedPolicyName:
+                Fn::Sub: ${RoleName}-permissions
+              Path: /powertools/
+              Description: Application permissions for this role.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Sid: EmptyPermissions
+                    Effect: Deny
+                    NotAction: '*'
+                    Resource: '*'
+              Roles:
+                - Ref: Role
+        Outputs:
+          RoleArn:
+            Value:
+              Fn::GetAtt:
+                - Role
+                - Arn
+          PolicyArn:
+            Value:
+              Ref: Permissions

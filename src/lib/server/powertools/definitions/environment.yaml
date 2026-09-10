@@ -1,0 +1,20 @@
+- id: iam-environment
+  title: Environment
+  recipes:
+    - id: iam-environment-setup
+      title: Tags
+      env:
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      command: export TAG_KEY=Project TAG_VALUE=my-app
+    - id: iam-change-role
+      title: Role
+      env:
+        - name: ROLE_NAME
+          example: my-app-role
+          required: true
+      command: export ROLE_NAME=my-app-role

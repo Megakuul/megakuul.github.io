@@ -1,18 +1,14 @@
-// @ts-nocheck
-import { lambdaZip } from './zip.mjs';
-/** Self-contained Bash + AWS CLI + jq commands without downloaded helpers. */
-/** @param {string} s */
-export const quote = s => "'" + s.replaceAll("'", "'\"'\"'") + "'";
-/** @param {string} code */
-export const expr = code => ({ __jq: code });
-export const ref = name => ({ Ref: name });
-export const sub = value => ({ 'Fn::Sub': value });
-export const att = (name, key = 'Arn') => ({ 'Fn::GetAtt': [name, key] });
-export const tags = [{ Key: ref('TagKey'), Value: ref('TagValue') }];
-export const region =
-  'export REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-$(aws configure get region)}}"';
-/** @param {string[]} steps @param {string[]} [inputs] */
-export function shell(steps, inputs = []) {
+import { lambdaZip } from './lambda-zip';
+import type { CloudFormationTemplate } from '$lib/powertools/types';
+/** Render CloudFormation submissions and emergency CLI commands from the same template. */
+const quote = (s: string) => "'" + s.replaceAll("'", "'\"'\"'") + "'";
+const expr = (code: string) => ({ __jq: code });
+const ref = (name: string) => ({ Ref: name });
+const sub = (value: string) => ({ 'Fn::Sub': value });
+const att = (name: string, key = 'Arn') => ({ 'Fn::GetAtt': [name, key] });
+const tags = [{ Key: ref('TagKey'), Value: ref('TagValue') }];
+const region = 'export REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-$(aws configure get region)}}"';
+function shell(steps: string[], inputs: string[] = []) {
   return [
     ': ' + ['TAG_KEY', 'TAG_VALUE', ...inputs].map(k => `"\${${k}:?Set ${k}}"`).join(' '),
     'export AWS_PAGER="" AWS_DEFAULT_OUTPUT=json',
@@ -20,10 +16,10 @@ export function shell(steps, inputs = []) {
     ...steps,
   ].join(' && ');
 }
-export function work() {
+function work() {
   return ['d=$(mktemp -d)', `trap ${quote('rm -rf "$d"')} EXIT`];
 }
-export function identity() {
+function identity() {
   return [
     'identity=$(aws sts get-caller-identity --output json)',
     'ACCOUNT_ID=$(jq -r .Account <<<"$identity")',
@@ -32,9 +28,9 @@ export function identity() {
   ];
 }
 /** Compile CFN intrinsics into jq expressions at page-build time. */
-export function compiler(template) {
+function compiler(template: CloudFormationTemplate) {
   const resources = template.Resources;
-  const envParams = {
+  const envParams: Record<string, string> = {
     TagKey: 'TAG_KEY',
     TagValue: 'TAG_VALUE',
     Name: 'NAME',
@@ -50,7 +46,7 @@ export function compiler(template) {
     DLQName: 'DLQ_NAME',
     AccessLogName: 'ACCESS_LOG_NAME',
   };
-  const nameFields = {
+  const nameFields: Record<string, string> = {
     'AWS::IAM::Role': 'RoleName',
     'AWS::IAM::ManagedPolicy': 'ManagedPolicyName',
     'AWS::IAM::InstanceProfile': 'InstanceProfileName',
@@ -79,23 +75,25 @@ export function compiler(template) {
     'AWS::Kinesis::Stream': 'Name',
     'AWS::AccessAnalyzer::Analyzer': 'AnalyzerName',
   };
-  function name(id) {
+  function name(id: string): string {
     const r = resources[id],
       p = r.Properties ?? {};
     if (p[nameFields[r.Type]]) return c(p[nameFields[r.Type]]);
     if (r.Type === 'AWS::S3::Bucket') return '(env.NAME[0:24]+"-"+env.ACCOUNT_ID+"-"+env.REGION)';
     return '(env.NAME+"-' + id + '")';
   }
-  function arn(id) {
+  function arn(id: string): string {
     const r = resources[id],
       n = name(id),
       p = r.Properties ?? {};
     if (r.Type === 'AWS::S3::Bucket') return '("arn:"+env.PARTITION+":s3:::"+' + n + ')';
-    const iam = {
-      'AWS::IAM::Role': 'role',
-      'AWS::IAM::ManagedPolicy': 'policy',
-      'AWS::IAM::InstanceProfile': 'instance-profile',
-    }[r.Type];
+    const iam = (
+      {
+        'AWS::IAM::Role': 'role',
+        'AWS::IAM::ManagedPolicy': 'policy',
+        'AWS::IAM::InstanceProfile': 'instance-profile',
+      } as Record<string, string>
+    )[r.Type];
     if (iam)
       return (
         '("arn:"+env.PARTITION+":iam::"+env.ACCOUNT_ID+":' +
@@ -106,20 +104,22 @@ export function compiler(template) {
         n +
         ')'
       );
-    const kind = {
-      'AWS::Logs::LogGroup': ['logs', 'log-group:'],
-      'AWS::SQS::Queue': ['sqs', ''],
-      'AWS::SNS::Topic': ['sns', ''],
-      'AWS::Lambda::Function': ['lambda', 'function:'],
-      'AWS::Events::Rule': ['events', 'rule/'],
-      'AWS::Events::EventBus': ['events', 'event-bus/'],
-      'AWS::CloudWatch::Alarm': ['cloudwatch', 'alarm:'],
-      'AWS::ECR::Repository': ['ecr', 'repository/'],
-      'AWS::ECS::Cluster': ['ecs', 'cluster/'],
-      'AWS::StepFunctions::StateMachine': ['states', 'stateMachine:'],
-      'AWS::Kinesis::Stream': ['kinesis', 'stream/'],
-      'AWS::AccessAnalyzer::Analyzer': ['access-analyzer', 'analyzer/'],
-    }[r.Type];
+    const kind = (
+      {
+        'AWS::Logs::LogGroup': ['logs', 'log-group:'],
+        'AWS::SQS::Queue': ['sqs', ''],
+        'AWS::SNS::Topic': ['sns', ''],
+        'AWS::Lambda::Function': ['lambda', 'function:'],
+        'AWS::Events::Rule': ['events', 'rule/'],
+        'AWS::Events::EventBus': ['events', 'event-bus/'],
+        'AWS::CloudWatch::Alarm': ['cloudwatch', 'alarm:'],
+        'AWS::ECR::Repository': ['ecr', 'repository/'],
+        'AWS::ECS::Cluster': ['ecs', 'cluster/'],
+        'AWS::StepFunctions::StateMachine': ['states', 'stateMachine:'],
+        'AWS::Kinesis::Stream': ['kinesis', 'stream/'],
+        'AWS::AccessAnalyzer::Analyzer': ['access-analyzer', 'analyzer/'],
+      } as Record<string, [string, string]>
+    )[r.Type];
     if (kind)
       return (
         '("arn:"+env.PARTITION+":' +
@@ -132,7 +132,7 @@ export function compiler(template) {
       );
     return `env.A_${id}`;
   }
-  function reference(key) {
+  function reference(key: string): string {
     if (key === 'AWS::NoValue') return 'null';
     if (key === 'AWS::StackName') return 'env.NAME';
     if (key === 'AWS::Region') return 'env.REGION';
@@ -169,7 +169,7 @@ export function compiler(template) {
       return 'env.R_' + key;
     return name(key);
   }
-  function c(v) {
+  function c(v: any): string {
     if (v === undefined || v === null) return 'null';
     if (Array.isArray(v)) return '[' + v.map(c).join(',') + ']';
     if (typeof v !== 'object') return JSON.stringify(v);
@@ -188,7 +188,9 @@ export function compiler(template) {
       for (const match of str.matchAll(/\$\{([^}]+)\}/g)) {
         parts.push(JSON.stringify(str.slice(start, match.index)));
         const key = match[1];
-        parts.push('(' + c(key.includes('.') ? att(...key.split('.')) : ref(key)) + ')');
+        parts.push(
+          '(' + c(key.includes('.') ? att(key.split('.')[0], key.split('.')[1]) : ref(key)) + ')',
+        );
         start = match.index + match[0].length;
       }
       parts.push(JSON.stringify(str.slice(start)));
@@ -196,12 +198,15 @@ export function compiler(template) {
     }
     if (v['Fn::If']) {
       const [k, a, b] = v['Fn::If'];
-      return '(if ' + c(template.Conditions[k]) + ' then (' + c(a) + ') else (' + c(b) + ') end)';
+      return '(if ' + c(template.Conditions?.[k]) + ' then (' + c(a) + ') else (' + c(b) + ') end)';
     }
-    if (v['Fn::Equals']) return '(' + v['Fn::Equals'].map(x => '(' + c(x) + ')').join(' == ') + ')';
+    if (v['Fn::Equals'])
+      return '(' + v['Fn::Equals'].map((x: any) => '(' + c(x) + ')').join(' == ') + ')';
     if (v['Fn::Not']) return '(' + c(v['Fn::Not'][0]) + ' | not)';
     if (v['Fn::Join']) return '(' + c(v['Fn::Join'][1]) + ' | join(' + c(v['Fn::Join'][0]) + '))';
-    const entries = Object.entries(v).filter(([, x]) => x !== undefined && x !== null);
+    const entries = Object.entries(v as Record<string, any>).filter(
+      ([, x]) => x !== undefined && x !== null,
+    );
     const object = '{' + entries.map(([k, x]) => JSON.stringify(k) + ':' + c(x)).join(',') + '}';
     return entries.some(([, x]) => x?.__jq?.includes('null') || x?.['Fn::If'])
       ? '(' + object + ' | with_entries(select(.value != null)))'
@@ -209,22 +214,24 @@ export function compiler(template) {
   }
   return { c, name, arn, reference };
 }
-export const templateFile = kind => `${kind}.yaml`;
-function stackName(kind, inputs) {
-  const key = inputs.includes('NAME')
-    ? 'NAME'
-    : inputs.includes('ROLE_NAME')
-      ? 'ROLE_NAME'
-      : inputs[0];
-  return key ? `powertools-${kind}-\${${key}//[^a-zA-Z0-9-]/-}` : `powertools-${kind}`;
+const templateFile = (kind: string) => `${kind}.yaml`;
+function stackName(kind: string, inputs: string[]) {
+  const key = inputs.includes('NAME') ? 'NAME' : inputs.includes('ROLE_NAME') ? 'ROLE_NAME' : null;
+  const prefix = kind === 'logging' ? 'powertools' : `powertools-${kind}`;
+  return key ? `${prefix}-\${${key}//[^a-zA-Z0-9-]/-}` : prefix;
 }
-const cfnTagExceptions = {
+const cfnTagExceptions: Record<string, string> = {
   'AWS::IAM::ManagedPolicy': 'managed policy',
   'AWS::IAM::InstanceProfile': 'instance profile',
   'AWS::Config::ConfigurationRecorder': 'Config recorder',
 };
 /** Keep the template as the default and direct API calls as the fallback. */
-export function creationCommands(resourceTemplate, kind, inputs = ['NAME'], cliOverride) {
+export function creationCommands(
+  resourceTemplate: CloudFormationTemplate,
+  kind: string,
+  inputs: string[] = ['NAME'],
+  cliOverride?: string,
+) {
   const cli = cliOverride ?? directCommand(resourceTemplate, kind, inputs);
   const untagged = [
     ...new Set(
@@ -246,10 +253,10 @@ export function creationCommands(resourceTemplate, kind, inputs = ['NAME'], cliO
   };
 }
 /** A normal CLI invocation: download the matching YAML, then submit the stack. */
-export function cfnCommand(template, kind, inputs = ['NAME']) {
+function cfnCommand(template: CloudFormationTemplate, kind: string, inputs: string[] = ['NAME']) {
   if (JSON.stringify(template.Resources).includes('Custom::'))
     throw Error('Deployment custom resources are not allowed');
-  const envParams = {
+  const envParams: Record<string, string> = {
     TagKey: 'TAG_KEY',
     TagValue: 'TAG_VALUE',
     Name: 'NAME',
@@ -275,8 +282,7 @@ export function cfnCommand(template, kind, inputs = ['NAME']) {
   if (Object.values(template.Resources).some(r => r.Type?.startsWith('AWS::IAM::')))
     capabilities.push('CAPABILITY_NAMED_IAM');
   if (template.Transform) capabilities.push('CAPABILITY_AUTO_EXPAND');
-  return [
-    `curl -fsSL https://megakuul.github.io/worldskills/powertools/templates/${templateFile(kind)} -o ${templateFile(kind)} &&`,
+  const deploy = [
     `aws cloudformation create-stack --stack-name "${stackName(kind, inputs)}"`,
     `--template-body file://${templateFile(kind)}`,
     parameters.length ? '--parameters ' + parameters.join(' ') : '',
@@ -285,19 +291,25 @@ export function cfnCommand(template, kind, inputs = ['NAME']) {
   ]
     .filter(Boolean)
     .join(' ');
+  return `curl -fsSL https://megakuul.github.io/worldskills/powertools/templates/${templateFile(kind)} -o ${templateFile(kind)} && ${deploy}`;
 }
 /** Build explicit AWS API calls; jq only serializes request JSON. */
-export function cliSteps(template) {
+function cliSteps(template: CloudFormationTemplate) {
   const e = compiler(template),
     steps = [];
-  const request = (service, operation, payload, id = 'response') => {
+  const request = (
+    service: string,
+    operation: string,
+    payload: Record<string, any>,
+    id = 'response',
+  ) => {
     const command = `aws ${service} ${operation} --cli-input-json "$(jq -cn ${quote(e.c(payload))})"`;
     steps.push(id === 'response' ? command : `result=$(${command})`);
   };
-  const output = (id, field, key = 'R') =>
+  const output = (id: string, field: string, key = 'R') =>
     steps.push(`export ${key}_${id}=$(jq -er ${quote(field)} <<<"$result")`);
-  const j = value => expr('(' + e.c(value) + ' | tojson)');
-  const tagmap = value =>
+  const j = (value: any) => expr('(' + e.c(value) + ' | tojson)');
+  const tagmap = (value: any) =>
     expr('(' + e.c(value ?? tags) + ' | map({key:.Key,value:.Value}) | from_entries)');
   for (const [id, r] of Object.entries(template.Resources)) {
     const p = r.Properties ?? {},
@@ -374,7 +386,7 @@ export function cliSteps(template) {
           });
         break;
       case 'AWS::SQS::Queue': {
-        const attrs = {};
+        const attrs: Record<string, any> = {};
         for (const [k, v] of Object.entries(p))
           if (!['QueueName', 'Tags'].includes(k))
             attrs[k] =
@@ -427,10 +439,12 @@ export function cliSteps(template) {
         request('s3api', 'put-bucket-encryption', {
           Bucket: n,
           ServerSideEncryptionConfiguration: {
-            Rules: p.BucketEncryption.ServerSideEncryptionConfiguration.map(rule => ({
-              ApplyServerSideEncryptionByDefault: rule.ServerSideEncryptionByDefault,
-              ...(rule.BucketKeyEnabled ? { BucketKeyEnabled: true } : {}),
-            })),
+            Rules: p.BucketEncryption.ServerSideEncryptionConfiguration.map(
+              (rule: Record<string, any>) => ({
+                ApplyServerSideEncryptionByDefault: rule.ServerSideEncryptionByDefault,
+                ...(rule.BucketKeyEnabled ? { BucketKeyEnabled: true } : {}),
+              }),
+            ),
           },
         });
         if (p.VersioningConfiguration)
@@ -442,7 +456,7 @@ export function cliSteps(template) {
           request('s3api', 'put-bucket-lifecycle-configuration', {
             Bucket: n,
             LifecycleConfiguration: {
-              Rules: p.LifecycleConfiguration.Rules.map(rule => ({
+              Rules: p.LifecycleConfiguration.Rules.map((rule: Record<string, any>) => ({
                 ID: rule.Id,
                 Status: rule.Status,
                 Filter: { Prefix: rule.Prefix ?? '' },
@@ -471,7 +485,7 @@ export function cliSteps(template) {
         request('s3api', 'put-bucket-policy', { Bucket: p.Bucket, Policy: j(p.PolicyDocument) });
         break;
       case 'AWS::Config::ConfigurationRecorder': {
-        const group = {};
+        const group: Record<string, any> = {};
         for (const [k, v] of Object.entries(p.RecordingGroup))
           group[k[0].toLowerCase() + k.slice(1)] = v;
         request('configservice', 'put-configuration-recorder', {
@@ -501,7 +515,7 @@ export function cliSteps(template) {
         break;
       case 'AWS::Lambda::Function': {
         steps.push(`printf %s ${quote(lambdaZip(p.Code.ZipFile))} | base64 -d > "$d/function.zip"`);
-        const input = { ...p, FunctionName: n, Tags: tagmap(t) };
+        const input: Record<string, any> = { ...p, FunctionName: n, Tags: tagmap(t) };
         delete input.Code;
         delete input.ReservedConcurrentExecutions;
         if (input.Environment)
@@ -759,7 +773,7 @@ export function cliSteps(template) {
 }
 const shortTagMap = `"$(jq -cn --arg key "\${TAG_KEY:?Set TAG_KEY}" --arg value "\${TAG_VALUE:?Set TAG_VALUE}" '{($key):$value}')"`;
 const shortTagList = `"Key=\${TAG_KEY:?Set TAG_KEY},Value=\${TAG_VALUE:?Set TAG_VALUE}"`;
-function simpleCommand(kind) {
+function simpleCommand(kind: string) {
   const name = '"${NAME:?Set NAME}"';
   if (kind === 'logs')
     return `aws logs create-log-group --log-group-name ${name} --deletion-protection-enabled --tags ${shortTagMap} && aws logs put-retention-policy --log-group-name "$NAME" --retention-in-days 30`;
@@ -772,7 +786,11 @@ function simpleCommand(kind) {
     return `aws ecr create-repository --repository-name ${name} --image-tag-mutability IMMUTABLE --image-scanning-configuration scanOnPush=true --encryption-configuration encryptionType=AES256 --tags ${shortTagList} && aws ecr put-lifecycle-policy --repository-name "$NAME" --lifecycle-policy-text '${JSON.stringify({ rules: [{ rulePriority: 1, description: 'Expire untagged images after 30 days', selection: { tagStatus: 'untagged', countType: 'sinceImagePushed', countUnit: 'days', countNumber: 30 }, action: { type: 'expire' } }] })}'`;
   return null;
 }
-export function directCommand(template, kind, inputs = ['NAME']) {
+function directCommand(
+  template: CloudFormationTemplate,
+  kind: string,
+  inputs: string[] = ['NAME'],
+) {
   const simple = simpleCommand(kind);
   if (simple) return simple;
   const source = structuredClone(template);
@@ -787,7 +805,7 @@ export function directCommand(template, kind, inputs = ['NAME']) {
     ...(Object.values(source.Resources).some(r => r.Type === 'AWS::Lambda::Function')
       ? work()
       : []),
-    `export NAME="\${NAME:-\${ROLE_NAME:-quickstart-${kind}}}"`,
+    `export NAME=${inputs.includes('NAME') ? '"$NAME"' : inputs.includes('ROLE_NAME') ? '"$ROLE_NAME"' : quote(stackName(kind, inputs))}`,
     ...identity(),
   ];
   if (template.Parameters?.RoleArn)
@@ -807,5 +825,22 @@ export function directCommand(template, kind, inputs = ['NAME']) {
       ? steps
       : steps.filter(step => !identity().includes(step)),
     inputs,
+  );
+}
+
+export function securityCommand() {
+  return shell(
+    [
+      ...identity(),
+      `tags=$(jq -cn '{(env.TAG_KEY):env.TAG_VALUE}')`,
+      'detector=$(aws guardduty list-detectors --query "DetectorIds[0]" --output text)',
+      'analyzers=$(aws accessanalyzer list-analyzers --output json)',
+      `jq -e --arg name "$NAME" 'all(.analyzers[]; .name != $name or .type == "ACCOUNT") and all(.analyzers[] | select(.type=="ACCOUNT"); .status=="ACTIVE" or .status=="CREATING")' <<<"$analyzers" >/dev/null`,
+      'analyzer=$(jq -r \'.analyzers[] | select(.type=="ACCOUNT") | .arn\' <<<"$analyzers")',
+      `if [ "$detector" = None ]; then detector=$(aws guardduty create-detector --enable --finding-publishing-frequency FIFTEEN_MINUTES --tags "$tags" --query DetectorId --output text); else aws guardduty update-detector --detector-id "$detector" --enable --finding-publishing-frequency FIFTEEN_MINUTES && aws guardduty tag-resource --resource-arn "arn:$PARTITION:guardduty:$REGION:$ACCOUNT_ID:detector/$detector" --tags "$tags"; fi`,
+      `if [ -n "$analyzer" ]; then aws accessanalyzer tag-resource --resource-arn "$analyzer" --tags "$tags"; else analyzer=$(aws accessanalyzer create-analyzer --analyzer-name "$NAME" --type ACCOUNT --tags "$tags" --query arn --output text); fi`,
+      `printf 'Detector: %s\\nAnalyzer: %s\\n' "$detector" "$analyzer"`,
+    ],
+    ['NAME'],
   );
 }

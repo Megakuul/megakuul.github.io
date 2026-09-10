@@ -1,6 +1,6 @@
 import { error } from '@sveltejs/kit';
-import { powertoolsGroups } from '../../recipes.mjs';
-import { cloudFormationYaml } from '../../template-format.mjs';
+import { powertoolsGroups } from '$lib/server/powertools';
+import { cloudFormationYaml } from '$lib/server/powertools/cloudformation';
 import type { EntryGenerator, RequestHandler } from './$types';
 
 export const prerender = true;
