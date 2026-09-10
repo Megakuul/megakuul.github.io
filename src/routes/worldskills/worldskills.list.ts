@@ -145,16 +145,28 @@ export const projects: Record<string, Project> = {
     published: '10.08.2026',
     services: ['cloudwatch'],
   },
+  'expensive-filesystem': {
+    title: 'Expensive FileSystem',
+    description: 'Burn money with bleeding-edge NFS technology',
+    published: '08.09.2026',
+    services: ['efs'],
+  },
   'iam-conditions': {
     title: 'IAM Cheatsheet',
     description: 'The Big Beautiful IAM Condition Cheatsheet',
     published: '30.08.2026',
     services: ['iam', 'sts', 'cognito'],
   },
+  'appconfig-agent': {
+    title: 'AppConfig Agent',
+    description: 'Configure the most retarded service in existence',
+    published: '08.09.2026',
+    services: ['appconfig', 'lambda', 'ecs', 'eks', 'iam'],
+  },
   codepipeline: {
     title: 'CodePipeline',
     description: 'Examples for the TEMU version of Github Workflows',
-    published: '05.09.2026',
+    published: '08.09.2026',
     services: [
       'codepipeline',
       'codebuild',
@@ -166,12 +178,6 @@ export const projects: Record<string, Project> = {
       's3',
       'cloudformation',
     ],
-  },
-  'appconfig-agent': {
-    title: 'AppConfig Agent',
-    description: 'Configure the most retarded service in existence',
-    published: '08.09.2026',
-    services: ['appconfig', 'lambda', 'ecs', 'eks', 'iam'],
   },
   'dead-mans-dashboard': {
     title: 'Dead Man’s Dashboard',
