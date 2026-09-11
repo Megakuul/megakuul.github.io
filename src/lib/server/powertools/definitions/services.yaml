@@ -8,14 +8,14 @@
           example: my-function
           required: true
           type: string
-          hint: ''
-          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
+          hint: ""
+          pattern: "[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"
         - name: ROLE_NAME
           example: my-app-role
           required: true
           type: string
           hint: Existing execution role; paste the required service permissions into its bound policy.
-          pattern: '[A-Za-z0-9+=,.@_-]{1,64}'
+          pattern: "[A-Za-z0-9+=,.@_-]{1,64}"
         - name: TAG_KEY
           example: Project
           required: true
@@ -69,7 +69,7 @@
               LoggingConfig:
                 LogFormat: JSON
                 ApplicationLogLevel: INFO
-                SystemLogLevel: INFO
+                SystemLogLevel: WARN
                 LogGroup:
                   Ref: Logs
               Tags:
@@ -98,8 +98,8 @@
           example: my-app-bucket-111122223333
           required: true
           type: string
-          hint: ''
-          pattern: '[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]'
+          hint: ""
+          pattern: "[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]"
         - name: TAG_KEY
           example: Project
           required: true
@@ -145,7 +145,7 @@
                     AbortIncompleteMultipartUpload:
                       DaysAfterInitiation: 7
                   - Id: OldVersions
-                    Prefix: ''
+                    Prefix: ""
                     Status: Enabled
                     NoncurrentVersionExpiration:
                       NoncurrentDays: 90
@@ -167,7 +167,7 @@
                 Version: 2012-10-17
                 Statement:
                   - Effect: Deny
-                    Principal: '*'
+                    Principal: "*"
                     Action: s3:*
                     Resource:
                       - Fn::GetAtt:
@@ -176,8 +176,8 @@
                       - Fn::Sub: ${AccessLogs.Arn}/*
                     Condition:
                       Bool:
-                        aws:SecureTransport: 'false'
-                        aws:PrincipalIsAWSService: 'false'
+                        aws:SecureTransport: "false"
+                        aws:PrincipalIsAWSService: "false"
                   - Effect: Allow
                     Principal:
                       Service: logging.s3.amazonaws.com
@@ -219,7 +219,7 @@
                     AbortIncompleteMultipartUpload:
                       DaysAfterInitiation: 7
                   - Id: OldVersions
-                    Prefix: ''
+                    Prefix: ""
                     Status: Enabled
                     NoncurrentVersionExpiration:
                       NoncurrentDays: 90
@@ -243,7 +243,7 @@
                 Version: 2012-10-17
                 Statement:
                   - Effect: Deny
-                    Principal: '*'
+                    Principal: "*"
                     Action: s3:*
                     Resource:
                       - Fn::GetAtt:
@@ -252,16 +252,16 @@
                       - Fn::Sub: ${Bucket.Arn}/*
                     Condition:
                       Bool:
-                        aws:SecureTransport: 'false'
-                        aws:PrincipalIsAWSService: 'false'
+                        aws:SecureTransport: "false"
+                        aws:PrincipalIsAWSService: "false"
                   - Effect: Deny
-                    Principal: '*'
+                    Principal: "*"
                     Action: s3:PutObject
                     Resource:
                       Fn::Sub: ${Bucket.Arn}/*
                     Condition:
-                      'Null':
-                        s3:x-amz-server-side-encryption-customer-algorithm: 'false'
+                      "Null":
+                        s3:x-amz-server-side-encryption-customer-algorithm: "false"
         Outputs:
           Bucket:
             Value:
@@ -346,7 +346,7 @@
                 Version: 2012-10-17
                 Statement:
                   - Effect: Deny
-                    Principal: '*'
+                    Principal: "*"
                     Action: sqs:*
                     Resource:
                       - Fn::GetAtt:
@@ -357,8 +357,8 @@
                           - Arn
                     Condition:
                       Bool:
-                        aws:SecureTransport: 'false'
-                        aws:PrincipalIsAWSService: 'false'
+                        aws:SecureTransport: "false"
+                        aws:PrincipalIsAWSService: "false"
         Outputs:
           QueueArn:
             Value:
@@ -377,8 +377,8 @@
           example: my-topic
           required: true
           type: string
-          hint: ''
-          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
+          hint: ""
+          pattern: "[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"
         - name: TAG_KEY
           example: Project
           required: true
@@ -420,14 +420,14 @@
                 Version: 2012-10-17
                 Statement:
                   - Effect: Deny
-                    Principal: '*'
+                    Principal: "*"
                     Action: sns:*
                     Resource:
                       Ref: Topic
                     Condition:
                       Bool:
-                        aws:SecureTransport: 'false'
-                        aws:PrincipalIsAWSService: 'false'
+                        aws:SecureTransport: "false"
+                        aws:PrincipalIsAWSService: "false"
         Outputs:
           TopicArn:
             Value:
@@ -439,8 +439,8 @@
           example: my-event-bus
           required: true
           type: string
-          hint: ''
-          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
+          hint: ""
+          pattern: "[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"
         - name: TAG_KEY
           example: Project
           required: true
@@ -485,8 +485,8 @@
           example: my-app/backend
           required: true
           type: string
-          hint: ''
-          pattern: '[a-z0-9]+(?:[._/-][a-z0-9]+)*'
+          hint: ""
+          pattern: "[a-z0-9]+(?:[._/-][a-z0-9]+)*"
         - name: TAG_KEY
           example: Project
           required: true
@@ -538,8 +538,8 @@
           example: my-cluster
           required: true
           type: string
-          hint: ''
-          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
+          hint: ""
+          pattern: "[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"
         - name: TAG_KEY
           example: Project
           required: true
@@ -614,7 +614,7 @@
           example: /app/my-app
           required: true
           type: string
-          hint: ''
+          hint: ""
           pattern: "[.\\-_/#A-Za-z0-9]{1,512}"
         - name: TAG_KEY
           example: Project
@@ -660,8 +660,8 @@
           example: my-app/database
           required: true
           type: string
-          hint: ''
-          pattern: '[A-Za-z0-9/_+=.@-]{1,512}'
+          hint: ""
+          pattern: "[A-Za-z0-9/_+=.@-]{1,512}"
         - name: TAG_KEY
           example: Project
           required: true
@@ -704,8 +704,8 @@
           example: my-app
           required: true
           type: string
-          hint: ''
-          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
+          hint: ""
+          pattern: "[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"
         - name: TAG_KEY
           example: Project
           required: true
@@ -794,14 +794,14 @@
           example: my-workflow
           required: true
           type: string
-          hint: ''
-          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
+          hint: ""
+          pattern: "[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"
         - name: ROLE_NAME
           example: my-app-role
           required: true
           type: string
           hint: Existing execution role; paste the required service permissions into its bound policy.
-          pattern: '[A-Za-z0-9+=,.@_-]{1,64}'
+          pattern: "[A-Za-z0-9+=,.@_-]{1,64}"
         - name: TAG_KEY
           example: Project
           required: true
@@ -877,8 +877,8 @@
           example: my-workgroup
           required: true
           type: string
-          hint: ''
-          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
+          hint: ""
+          pattern: "[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"
         - name: TAG_KEY
           example: Project
           required: true
@@ -923,8 +923,8 @@
           example: my-stream
           required: true
           type: string
-          hint: ''
-          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
+          hint: ""
+          pattern: "[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"
         - name: TAG_KEY
           example: Project
           required: true
@@ -973,7 +973,7 @@
                 Version: 2012-10-17
                 Statement:
                   - Effect: Deny
-                    Principal: '*'
+                    Principal: "*"
                     Action: kinesis:*
                     Resource:
                       Fn::GetAtt:
@@ -981,8 +981,8 @@
                         - Arn
                     Condition:
                       Bool:
-                        aws:SecureTransport: 'false'
-                        aws:PrincipalIsAWSService: 'false'
+                        aws:SecureTransport: "false"
+                        aws:PrincipalIsAWSService: "false"
         Outputs:
           StreamArn:
             Value:
@@ -996,7 +996,7 @@
           example: account-access
           required: true
           type: string
-          pattern: '[A-Za-z][A-Za-z0-9_-]{0,254}'
+          pattern: "[A-Za-z][A-Za-z0-9_-]{0,254}"
           hint: External-access analyzer name. Reuses an existing account external-access analyzer in REGION, even if named differently.
         - name: TAG_KEY
           example: Project

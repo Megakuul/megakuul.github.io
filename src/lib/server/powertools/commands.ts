@@ -517,7 +517,6 @@ function cliSteps(template: CloudFormationTemplate) {
         steps.push(`printf %s ${quote(lambdaZip(p.Code.ZipFile))} | base64 -d > "$d/function.zip"`);
         const input: Record<string, any> = { ...p, FunctionName: n, Tags: tagmap(t) };
         delete input.Code;
-        delete input.ReservedConcurrentExecutions;
         if (input.Environment)
           input.Environment = {
             Variables: Object.fromEntries(
@@ -532,11 +531,6 @@ function cliSteps(template: CloudFormationTemplate) {
           `aws lambda create-function --cli-input-json "file://$d/request.json" --zip-file "fileb://$d/function.zip"`,
           `aws lambda wait function-active-v2 --function-name "$(jq -nr ${quote(e.name(id))})"`,
         );
-        if (p.ReservedConcurrentExecutions !== undefined)
-          request('lambda', 'put-function-concurrency', {
-            FunctionName: n,
-            ReservedConcurrentExecutions: p.ReservedConcurrentExecutions,
-          });
         break;
       }
       case 'AWS::Lambda::EventInvokeConfig':
