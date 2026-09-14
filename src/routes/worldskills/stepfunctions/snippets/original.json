@@ -1,0 +1,19 @@
+{
+  "QueryLanguage": "JSONPath",
+  "StartAt": "SelectOrder",
+  "States": {
+    "SelectOrder": {
+      "Type": "Pass",
+      "InputPath": "$.order",
+      "Next": "Restore"
+    },
+    "Restore": {
+      "Type": "Pass",
+      "Parameters": {
+        "current.$": "$",
+        "original.$": "$$.Execution.Input"
+      },
+      "End": true
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "QueryLanguage": "JSONPath",
+  "StartAt": "Build",
+  "States": {
+    "Build": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::codebuild:startBuild.sync",
+      "Parameters": {
+        "ProjectName": "worldskills-build",
+        "EnvironmentVariablesOverride": [
+          {
+            "Name": "ORDER_ID",
+            "Type": "PLAINTEXT",
+            "Value.$": "$.orderId"
+          }
+        ]
+      },
+      "ResultSelector": {
+        "status.$": "$.Build.BuildStatus"
+      },
+      "ResultPath": "$.build",
+      "Next": "Read"
+    },
+    "Read": {
+      "Type": "Pass",
+      "Parameters": {
+        "orderId.$": "$.orderId",
+        "status.$": "$.build.status"
+      },
+      "End": true
+    }
+  }
+}

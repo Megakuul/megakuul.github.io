@@ -1,0 +1,21 @@
+{
+  "QueryLanguage": "JSONPath",
+  "StartAt": "Prepare",
+  "States": {
+    "Prepare": {
+      "Type": "Pass",
+      "Result": {
+        "status": "READY"
+      },
+      "ResultPath": null,
+      "Next": "NextStep"
+    },
+    "NextStep": {
+      "Type": "Pass",
+      "Parameters": {
+        "received.$": "$"
+      },
+      "End": true
+    }
+  }
+}

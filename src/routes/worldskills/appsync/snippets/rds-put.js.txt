@@ -1,0 +1,25 @@
+import { util } from '@aws-appsync/utils';
+import { sql, createPgStatement, toJsonObject } from '@aws-appsync/utils/rds';
+
+export function request(ctx) {
+  if (util.authType() !== 'User Pool Authorization' || !ctx.identity?.sub) {
+    util.unauthorized();
+  }
+  const owner = ctx.identity.sub;
+  const title = ctx.args.title.trim();
+  if (!title || title.length > 200) util.error('Title: 1–200 characters', 'BadRequest');
+  return createPgStatement(sql`
+    INSERT INTO items (owner, id, title, version)
+    VALUES (${owner}, ${ctx.args.id}, ${title}, 1)
+    ON CONFLICT (owner, id) DO UPDATE
+    SET title = EXCLUDED.title, version = items.version + 1
+    RETURNING id, owner, title, version
+  `);
+}
+
+export function response(ctx) {
+  if (ctx.error) util.error('Database request failed', ctx.error.type);
+  const rows = toJsonObject(ctx.result);
+  if (!rows) util.error('Invalid database response', 'UpstreamError');
+  return rows[0][0] ?? null;
+}

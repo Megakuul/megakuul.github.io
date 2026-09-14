@@ -1,0 +1,67 @@
+#cloud-config
+# Amazon Linux 2023; instance role: iot:DescribeEndpoint and scoped iot:Publish.
+package_update: true
+packages:
+- awscli-2
+ssh_pwauth: false
+disable_root: true
+users:
+- default
+- name: app
+  system: true
+  lock_passwd: true
+  shell: /sbin/nologin
+write_files:
+- path: /etc/app.env
+  owner: root:root
+  permissions: '0600'
+  content: |
+    AWS_DEFAULT_REGION=eu-central-1
+    TOPIC=devices/sensor-1/telemetry
+- path: /usr/local/bin/iot-publish
+  owner: root:root
+  permissions: '0755'
+  content: |
+    #!/bin/bash
+    set -euo pipefail
+    export AWS_PAGER="" AWS_RETRY_MODE=standard AWS_MAX_ATTEMPTS=5
+    endpoint=$(aws iot describe-endpoint --endpoint-type iot:Data-ATS --query endpointAddress --output text)
+    aws iot-data publish --endpoint-url "https://$endpoint" --topic "$TOPIC" --qos 1 --cli-binary-format raw-in-base64-out --payload '{"temperature":23.5}'
+- path: /etc/systemd/system/iot-publish.service
+  owner: root:root
+  permissions: '0644'
+  content: |
+    [Unit]
+    Description=Publish simulated IoT telemetry
+    Wants=network-online.target
+    After=network-online.target
+
+    [Service]
+    Type=oneshot
+    User=app
+    Group=app
+    EnvironmentFile=/etc/app.env
+    ExecStart=/usr/local/bin/iot-publish
+    TimeoutStartSec=50
+    NoNewPrivileges=true
+    PrivateTmp=true
+    ProtectSystem=strict
+    ProtectHome=true
+    UMask=0027
+- path: /etc/systemd/system/iot-publish.timer
+  owner: root:root
+  permissions: '0644'
+  content: |
+    [Unit]
+    Description=IoT telemetry every minute
+
+    [Timer]
+    OnBootSec=30
+    OnUnitActiveSec=60
+    Unit=iot-publish.service
+
+    [Install]
+    WantedBy=timers.target
+runcmd:
+- [systemctl, daemon-reload]
+- [systemctl, enable, --now, iot-publish.timer]

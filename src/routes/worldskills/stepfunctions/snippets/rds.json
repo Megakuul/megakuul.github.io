@@ -1,0 +1,69 @@
+{
+  "QueryLanguage": "JSONata",
+  "StartAt": "Save",
+  "States": {
+    "Save": {
+      "Type": "Pass",
+      "Assign": {
+        "order": "{% $states.input.order %}",
+        "db": {
+          "cluster": "arn:aws:rds:eu-central-1:111122223333:cluster:worldskills",
+          "secret": "arn:aws:secretsmanager:eu-central-1:111122223333:secret:worldskills-db-AbCdEf",
+          "database": "worldskills"
+        }
+      },
+      "Output": {},
+      "Next": "CreateTable"
+    },
+    "CreateTable": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:rdsdata:executeStatement",
+      "Arguments": {
+        "ResourceArn": "{% $db.cluster %}",
+        "SecretArn": "{% $db.secret %}",
+        "Database": "{% $db.database %}",
+        "Sql": "CREATE TABLE IF NOT EXISTS workflow_orders (order_id VARCHAR(64) PRIMARY KEY, total_cents BIGINT NOT NULL, payload JSONB NOT NULL)"
+      },
+      "Output": {},
+      "Next": "Write"
+    },
+    "Write": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:rdsdata:executeStatement",
+      "Arguments": {
+        "ResourceArn": "{% $db.cluster %}",
+        "SecretArn": "{% $db.secret %}",
+        "Database": "{% $db.database %}",
+        "Sql": "INSERT INTO workflow_orders (order_id, total_cents, payload) VALUES (:id, :total, CAST(:payload AS jsonb)) ON CONFLICT (order_id) DO UPDATE SET total_cents = EXCLUDED.total_cents, payload = EXCLUDED.payload",
+        "Parameters": [
+          {
+            "Name": "id",
+            "Value": { "StringValue": "{% $order.id %}" }
+          },
+          {
+            "Name": "total",
+            "Value": { "LongValue": "{% $order.totalCents %}" }
+          },
+          {
+            "Name": "payload",
+            "TypeHint": "JSON",
+            "Value": { "StringValue": "{% $string($order) %}" }
+          }
+        ]
+      },
+      "Assign": {
+        "writeResult": "{% $states.result %}"
+      },
+      "Output": "{% $order %}",
+      "Next": "Read"
+    },
+    "Read": {
+      "Type": "Pass",
+      "Output": {
+        "orderId": "{% $states.input.id %}",
+        "rowsWritten": "{% $writeResult.NumberOfRecordsUpdated %}"
+      },
+      "End": true
+    }
+  }
+}

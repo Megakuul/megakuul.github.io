@@ -7,6 +7,7 @@ export const prerender = true;
 const templates = () =>
   powertoolsGroups()
     .flatMap(group => group.recipes)
+    .flatMap(recipe => (recipe.serviceOnly ? [recipe, recipe.serviceOnly] : [recipe]))
     .filter(recipe => recipe.templateFile);
 export const entries: EntryGenerator = () =>
   templates().map(recipe => ({ name: recipe.templateFile! }));

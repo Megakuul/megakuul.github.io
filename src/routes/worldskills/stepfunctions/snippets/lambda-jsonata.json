@@ -1,0 +1,30 @@
+{
+  "QueryLanguage": "JSONata",
+  "StartAt": "Invoke",
+  "States": {
+    "Invoke": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "arn:aws:lambda:eu-central-1:111122223333:function:worker",
+        "Payload": {
+          "id": "{% $states.input.order.id %}"
+        }
+      },
+      "Assign": {
+        "receipt": "{% $states.result.Payload %}"
+      },
+      "Output": "{% $merge([$states.input, {\"receipt\": $states.result.Payload}]) %}",
+      "Next": "Read"
+    },
+    "Read": {
+      "Type": "Pass",
+      "Output": {
+        "orderId": "{% $states.input.order.id %}",
+        "total": "{% $receipt.total %}",
+        "current": "{% $states.input %}"
+      },
+      "End": true
+    }
+  }
+}

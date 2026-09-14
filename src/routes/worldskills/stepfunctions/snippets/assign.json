@@ -1,0 +1,22 @@
+{
+  "QueryLanguage": "JSONata",
+  "StartAt": "Save",
+  "States": {
+    "Save": {
+      "Type": "Pass",
+      "Assign": {
+        "customer": "{% $states.input.customer %}"
+      },
+      "Output": {},
+      "Next": "Read"
+    },
+    "Read": {
+      "Type": "Pass",
+      "Output": {
+        "saved": "{% $customer %}",
+        "current": "{% $states.input %}"
+      },
+      "End": true
+    }
+  }
+}

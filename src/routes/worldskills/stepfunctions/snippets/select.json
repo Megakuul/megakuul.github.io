@@ -1,0 +1,23 @@
+{
+  "QueryLanguage": "JSONPath",
+  "StartAt": "ReadOrder",
+  "States": {
+    "ReadOrder": {
+      "Type": "Pass",
+      "InputPath": "$.order",
+      "Parameters": {
+        "id.$": "$.id",
+        "quantity.$": "$.quantity",
+        "literal": "$.id"
+      },
+      "Next": "NextStep"
+    },
+    "NextStep": {
+      "Type": "Pass",
+      "Parameters": {
+        "received.$": "$"
+      },
+      "End": true
+    }
+  }
+}

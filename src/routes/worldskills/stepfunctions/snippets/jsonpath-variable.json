@@ -1,0 +1,28 @@
+{
+  "QueryLanguage": "JSONPath",
+  "StartAt": "Save",
+  "States": {
+    "Save": {
+      "Type": "Pass",
+      "Assign": {
+        "customer.$": "$.customer"
+      },
+      "Next": "ReplacePayload"
+    },
+    "ReplacePayload": {
+      "Type": "Pass",
+      "Result": {
+        "status": "READY"
+      },
+      "Next": "Read"
+    },
+    "Read": {
+      "Type": "Pass",
+      "Parameters": {
+        "saved.$": "$customer",
+        "current.$": "$"
+      },
+      "End": true
+    }
+  }
+}

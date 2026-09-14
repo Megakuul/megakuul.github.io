@@ -1,0 +1,22 @@
+{
+  "QueryLanguage": "JSONPath",
+  "StartAt": "Decode",
+  "States": {
+    "Decode": {
+      "Type": "Pass",
+      "Parameters": {
+        "decoded.$": "States.StringToJson($.body)",
+        "encoded.$": "States.JsonToString($.record)"
+      },
+      "Next": "Read"
+    },
+    "Read": {
+      "Type": "Pass",
+      "Parameters": {
+        "orderId.$": "$.decoded.order.id",
+        "body.$": "$.encoded"
+      },
+      "End": true
+    }
+  }
+}

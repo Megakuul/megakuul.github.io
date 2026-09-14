@@ -1,0 +1,28 @@
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+  if (util.authType() !== 'User Pool Authorization' || !ctx.identity?.sub) {
+    util.unauthorized();
+  }
+  const owner = ctx.identity.sub;
+  return {
+    operation: 'GET',
+    path: '/items/_search',
+    params: {
+      body: {
+        size: 20,
+        query: {
+          bool: {
+            filter: [{ term: { owner } }],
+            must: [{ match: { title: ctx.args.query } }],
+          },
+        },
+      },
+    },
+  };
+}
+
+export function response(ctx) {
+  if (ctx.error) util.error('Search request failed', ctx.error.type);
+  return ctx.result.hits.hits.map(hit => hit._source);
+}

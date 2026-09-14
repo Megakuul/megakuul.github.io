@@ -1,0 +1,27 @@
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+  if (util.authType() !== 'User Pool Authorization' || !ctx.identity?.sub) {
+    util.unauthorized();
+  }
+  const owner = ctx.identity.sub;
+  return {
+    method: 'POST',
+    resourcePath: '/items',
+    params: {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: ctx.args.input, owner }),
+    },
+  };
+}
+
+export function response(ctx) {
+  if (ctx.error) util.error('HTTP request failed', ctx.error.type);
+  if (ctx.result.statusCode < 200 || ctx.result.statusCode >= 300) {
+    util.error('HTTP request failed', 'UpstreamError');
+  }
+  if (ctx.result.statusCode === 204) return null;
+  const body = JSON.parse(ctx.result.body);
+  if (body === '') util.error('Expected JSON response', 'UpstreamError');
+  return JSON.stringify(body);
+}

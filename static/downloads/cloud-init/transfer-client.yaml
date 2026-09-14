@@ -1,0 +1,73 @@
+#cloud-config
+# Amazon Linux 2023; instance role: GetSecretValue on the SSH key secret.
+# SecretString contains the OpenSSH private key. No private keys in user data.
+# Replace the host and its VERIFIED host public key below before launching.
+# Connect from a subnet allowed by the Transfer server security group.
+package_update: true
+packages:
+- awscli-2
+- openssh-clients
+ssh_pwauth: false
+disable_root: true
+users:
+- default
+- name: app
+  system: true
+  lock_passwd: true
+  shell: /sbin/nologin
+write_files:
+- path: /etc/transfer.env
+  owner: root:root
+  permissions: '0600'
+  content: |
+    AWS_DEFAULT_REGION=eu-central-1
+    KEY_SECRET=transfer/uploader-key
+    SFTP_HOST=s-0123456789abcdef0.server.transfer.eu-central-1.amazonaws.com
+    SFTP_USER=uploader
+- path: /etc/transfer_known_hosts
+  owner: root:root
+  permissions: '0644'
+  content: |
+    s-0123456789abcdef0.server.transfer.eu-central-1.amazonaws.com ssh-ed25519 REPLACE_WITH_VERIFIED_HOST_PUBLIC_KEY
+- path: /usr/local/bin/transfer-upload
+  owner: root:root
+  permissions: '0755'
+  content: |
+    #!/bin/bash
+    set -euo pipefail
+    export AWS_PAGER="" AWS_RETRY_MODE=standard AWS_MAX_ATTEMPTS=5
+    umask 077
+    key=$(mktemp /run/transfer/key.XXXXXX)
+    trap 'rm -f "$key"' EXIT
+    aws secretsmanager get-secret-value --secret-id "$KEY_SECRET" --query SecretString --output text > "$key"
+    printf 'put /var/lib/transfer/report.csv /report.csv\n' | sftp -b - -i "$key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/transfer_known_hosts -o ConnectTimeout=15 "$SFTP_USER@$SFTP_HOST"
+- path: /etc/systemd/system/transfer-upload.service
+  owner: root:root
+  permissions: '0644'
+  content: |
+    [Unit]
+    Description=Upload a report to Transfer Family
+    Wants=network-online.target
+    After=network-online.target
+
+    [Service]
+    Type=oneshot
+    User=app
+    Group=app
+    EnvironmentFile=/etc/transfer.env
+    ExecStart=/usr/local/bin/transfer-upload
+    RuntimeDirectory=transfer
+    RuntimeDirectoryMode=0700
+    StateDirectory=transfer
+    StateDirectoryMode=0750
+    TimeoutStartSec=120
+    NoNewPrivileges=true
+    PrivateTmp=true
+    ProtectSystem=strict
+    ProtectHome=true
+    ReadOnlyPaths=/var/lib/transfer
+    UMask=0077
+runcmd:
+- [install, -d, -o, app, -g, app, -m, '0750', /var/lib/transfer]
+- [systemctl, daemon-reload]
+# Put report.csv in /var/lib/transfer, then start transfer-upload.service.

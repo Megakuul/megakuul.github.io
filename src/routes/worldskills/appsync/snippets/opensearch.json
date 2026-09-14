@@ -1,0 +1,10 @@
+{
+  "mappings": {
+    "properties": {
+      "id": { "type": "keyword" },
+      "owner": { "type": "keyword" },
+      "title": { "type": "text" },
+      "version": { "type": "integer" }
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "QueryLanguage": "JSONPath",
+  "StartAt": "Invoke",
+  "States": {
+    "Invoke": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "InputPath": "$.order",
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:eu-central-1:111122223333:function:worker",
+        "Payload": {
+          "id.$": "$.id",
+          "quantity.$": "$.quantity"
+        }
+      },
+      "ResultSelector": {
+        "total.$": "$.Payload.total"
+      },
+      "ResultPath": "$.order.receipt",
+      "OutputPath": "$.order",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "BackoffRate": 2,
+          "MaxAttempts": 3,
+          "JitterStrategy": "FULL"
+        }
+      ],
+      "Next": "Read"
+    },
+    "Read": {
+      "Type": "Pass",
+      "Parameters": {
+        "orderId.$": "$.id",
+        "quantity.$": "$.quantity",
+        "total.$": "$.receipt.total"
+      },
+      "End": true
+    }
+  }
+}

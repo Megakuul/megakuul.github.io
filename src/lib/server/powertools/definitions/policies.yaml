@@ -810,3 +810,95 @@
             Condition:
               StringEquals:
                 aws:RequestedRegion: eu-central-1
+- id: iam-access-integrations
+  title: IoT, file transfer and ETL policies
+  recipes:
+    - id: iam-access-iot-publish
+      title: IoT Publish
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: iot:DescribeEndpoint
+            Resource: "*"
+          - Effect: Allow
+            Action: iot:Publish
+            Resource: arn:aws:iot:eu-central-1:111122223333:topic/devices/sensor-1/telemetry
+    - id: iam-access-iot-shadow
+      title: IoT Shadow
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - iot:GetThingShadow
+              - iot:UpdateThingShadow
+            Resource: arn:aws:iot:eu-central-1:111122223333:thing/sensor-1
+    - id: iam-access-firehose-put
+      title: Firehose Producer
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - firehose:PutRecord
+              - firehose:PutRecordBatch
+            Resource: arn:aws:firehose:eu-central-1:111122223333:deliverystream/my-firehose
+    - id: iam-access-transfer-connector
+      title: Transfer Connector
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - transfer:StartFileTransfer
+              - transfer:ListFileTransferResults
+            Resource: arn:aws:transfer:eu-central-1:111122223333:connector/c-0123456789abcdef0
+    - id: iam-access-transfer-callback
+      title: Transfer Workflow Callback
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: transfer:SendWorkflowStepState
+            Resource: arn:aws:transfer:eu-central-1:111122223333:workflow/w-0123456789abcdef0
+    - id: iam-access-glue-operate
+      title: Glue Job and Crawler
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - glue:StartJobRun
+              - glue:GetJobRun
+            Resource: arn:aws:glue:eu-central-1:111122223333:job/my-etl
+          - Effect: Allow
+            Action: glue:StartCrawler
+            Resource: arn:aws:glue:eu-central-1:111122223333:crawler/my-crawler
+    - id: iam-access-scheduler-create
+      title: Scheduler Create
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - scheduler:CreateSchedule
+              - scheduler:DeleteSchedule
+            Resource: arn:aws:scheduler:eu-central-1:111122223333:schedule/my-scheduler/*
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: arn:aws:iam::111122223333:role/my-scheduler-execution
+            Condition:
+              StringEquals:
+                iam:PassedToService: scheduler.amazonaws.com
+    - id: iam-access-datasync-execute
+      title: DataSync Execute
+      policy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: datasync:StartTaskExecution
+            Resource: arn:aws:datasync:eu-central-1:111122223333:task/task-0123456789abcdef0
+          - Effect: Allow
+            Action: datasync:DescribeTaskExecution
+            Resource: arn:aws:datasync:eu-central-1:111122223333:task/task-0123456789abcdef0/execution/*

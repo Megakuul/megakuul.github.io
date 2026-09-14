@@ -6,7 +6,7 @@
   let menuOpen = $state(false);
   let copiedId = $state('');
   let copyError = $state('');
-  let cliModes = $state<Record<string, boolean>>({});
+  let commandModes = $state<Record<string, 'cfn' | 'cli' | 'serviceOnly'>>({});
   let items = $derived(
     data.groups.flatMap(group => [
       { id: group.id, title: group.title, level: 0 },
@@ -59,6 +59,11 @@
         <h2 id={group.id} class="mb-3 scroll-mt-24 text-2xl font-bold">{group.title}</h2>
         <div class="space-y-4">
           {#each group.recipes as snippet}
+            {@const mode = commandModes[snippet.id] ?? 'cfn'}
+            {@const isCli = mode === 'cli'}
+            {@const deployment = mode === 'serviceOnly' ? snippet.serviceOnly! : snippet}
+            {@const command = isCli ? snippet.cliCommand! : deployment.command}
+            {@const commandHtml = isCli ? snippet.cliHtml! : deployment.commandHtml}
             <article
               id={snippet.id}
               class="min-w-0 scroll-mt-24 overflow-hidden rounded-xl border border-white/10 bg-white/[0.02]"
@@ -68,13 +73,13 @@
               >
                 <h3 class="min-w-0 text-sm font-semibold">{snippet.title}</h3>
                 <div class="flex shrink-0 items-center gap-2">
-                  {#if snippet.templateFile && !cliModes[snippet.id]}
+                  {#if deployment.templateFile && !isCli}
                     <a
                       class="copy-button"
-                      href={snippet.templateUrl!}
-                      download={snippet.templateFile}
-                      title={snippet.templateFile}
-                      aria-label={`Download ${snippet.templateFile}`}>Download</a
+                      href={deployment.templateUrl!}
+                      download={deployment.templateFile}
+                      title={deployment.templateFile}
+                      aria-label={`Download ${deployment.templateFile}`}>Download</a
                     >
                   {/if}
                   <button
@@ -83,32 +88,41 @@
                     onclick={() =>
                       copy(
                         snippet.id + '-command',
-                        snippet.documentOnly
-                          ? snippet.documentCode!
-                          : cliModes[snippet.id] && snippet.cliCommand
-                            ? snippet.cliCommand
-                            : snippet.command,
+                        snippet.documentOnly ? deployment.documentCode! : command,
                       )}>{copiedId === snippet.id + '-command' ? 'Copied ✓' : 'Copy'}</button
                   >
                 </div>
               </div>
               {#if snippet.cliCommand}
                 <div
-                  class="flex gap-2 border-b border-white/5 px-4 py-2"
+                  class="flex flex-wrap gap-2 border-b border-white/5 px-4 py-2"
                   role="group"
                   aria-label={`${snippet.title} deployment method`}
                 >
                   <button
                     class="copy-button"
-                    aria-pressed={!cliModes[snippet.id]}
-                    onclick={() => (cliModes[snippet.id] = false)}>CloudFormation</button
+                    aria-pressed={mode === 'cfn'}
+                    onclick={() => (commandModes[snippet.id] = 'cfn')}>CloudFormation</button
                   >
+                  {#if snippet.serviceOnly}
+                    <button
+                      class="copy-button"
+                      aria-pressed={mode === 'serviceOnly'}
+                      onclick={() => (commandModes[snippet.id] = 'serviceOnly')}
+                      >CloudFormation · service only</button
+                    >
+                  {/if}
                   <button
                     class="copy-button"
-                    aria-pressed={!!cliModes[snippet.id]}
-                    onclick={() => (cliModes[snippet.id] = true)}>AWS CLI</button
+                    aria-pressed={mode === 'cli'}
+                    onclick={() => (commandModes[snippet.id] = 'cli')}>AWS CLI</button
                   >
                 </div>
+              {/if}
+              {#if mode === 'serviceOnly'}
+                <p class="border-b border-white/5 px-4 py-2 text-xs text-slate-400">
+                  Skips optional access policies. Required service roles still need IAM permissions.
+                </p>
               {/if}
               {#if !snippet.documentOnly && snippet.env.length}
                 <div
@@ -116,7 +130,7 @@
                   role="group"
                   aria-label="Environment variables (* required)"
                 >
-                  {#each cliModes[snippet.id] && snippet.cliEnv ? snippet.cliEnv : snippet.env as variable}
+                  {#each isCli && snippet.cliEnv ? snippet.cliEnv : snippet.env as variable}
                     <button
                       class="env-variable"
                       class:required={variable.required}
@@ -141,27 +155,25 @@
                 role="region"
                 aria-label={snippet.title}
               >
-                {@html snippet.documentOnly
-                  ? snippet.documentHtml!
-                  : cliModes[snippet.id] && snippet.cliHtml
-                    ? snippet.cliHtml
-                    : snippet.commandHtml}
+                {@html snippet.documentOnly ? deployment.documentHtml! : commandHtml}
               </div>
-              {#if snippet.cfnTagNote && !cliModes[snippet.id]}
+              {#if deployment.cfnTagNote && !isCli}
                 <p class="border-t border-white/5 px-4 py-2 text-xs text-slate-400">
-                  {snippet.cfnTagNote}
+                  {deployment.cfnTagNote}
                 </p>
               {/if}
-              {#if !snippet.documentOnly && snippet.documentCode !== null && snippet.documentHtml !== null}
+              {#if !snippet.documentOnly && deployment.documentCode !== null && deployment.documentHtml !== null}
                 <details class="border-t border-white/10">
                   <summary class="cursor-pointer px-4 py-2.5 text-sm text-slate-300"
-                    >{snippet.documentTitle}</summary
+                    >{snippet.documentTitle}{mode === 'serviceOnly'
+                      ? ' · service only'
+                      : ''}</summary
                   >
                   <div class="flex justify-end px-4 pb-2">
                     <button
                       class="copy-button"
                       aria-label={`Copy ${snippet.title} ${snippet.documentLanguage.toUpperCase()}`}
-                      onclick={() => copy(snippet.id + '-document', snippet.documentCode!)}
+                      onclick={() => copy(snippet.id + '-document', deployment.documentCode!)}
                       >{copiedId === snippet.id + '-document'
                         ? 'Copied ✓'
                         : `Copy ${snippet.documentLanguage.toUpperCase()}`}</button
@@ -174,7 +186,7 @@
                     role="region"
                     aria-label={`${snippet.title} ${snippet.documentLanguage.toUpperCase()}`}
                   >
-                    {@html snippet.documentHtml}
+                    {@html deployment.documentHtml}
                   </div>
                 </details>
               {/if}

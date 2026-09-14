@@ -1,0 +1,49 @@
+{
+  "QueryLanguage": "JSONata",
+  "StartAt": "Save",
+  "States": {
+    "Save": {
+      "Type": "Pass",
+      "Assign": {
+        "customerId": "{% $states.input.customerId %}"
+      },
+      "Next": "EachItem"
+    },
+    "EachItem": {
+      "Type": "Map",
+      "Items": "{% $states.input.items %}",
+      "ItemProcessor": {
+        "ProcessorConfig": {
+          "Mode": "INLINE"
+        },
+        "StartAt": "Calculate",
+        "States": {
+          "Calculate": {
+            "Type": "Pass",
+            "Assign": {
+              "lineTotal": "{% $states.input.price * $states.input.quantity %}"
+            },
+            "Next": "Return"
+          },
+          "Return": {
+            "Type": "Pass",
+            "Output": {
+              "customerId": "{% $customerId %}",
+              "total": "{% $lineTotal %}"
+            },
+            "End": true
+          }
+        }
+      },
+      "Next": "Read"
+    },
+    "Read": {
+      "Type": "Pass",
+      "Output": {
+        "lines": "{% $states.input %}",
+        "customerId": "{% $customerId %}"
+      },
+      "End": true
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "QueryLanguage": "JSONPath",
+  "StartAt": "RequestApproval",
+  "States": {
+    "RequestApproval": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sqs:sendMessage.waitForTaskToken",
+      "Parameters": {
+        "QueueUrl": "https://sqs.eu-central-1.amazonaws.com/111122223333/approvals",
+        "MessageBody": {
+          "taskToken.$": "$$.Task.Token",
+          "order.$": "$.order"
+        }
+      },
+      "TimeoutSeconds": 600,
+      "ResultPath": "$.approval",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.Timeout"],
+          "ResultPath": "$.error",
+          "Next": "Expired"
+        }
+      ],
+      "Next": "Read"
+    },
+    "Read": {
+      "Type": "Pass",
+      "Parameters": {
+        "orderId.$": "$.order.id",
+        "approved.$": "$.approval.approved"
+      },
+      "End": true
+    },
+    "Expired": {
+      "Type": "Pass",
+      "Parameters": {
+        "orderId.$": "$.order.id",
+        "error.$": "$.error.Error"
+      },
+      "End": true
+    }
+  }
+}

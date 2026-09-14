@@ -1,0 +1,22 @@
+{
+  "QueryLanguage": "JSONPath",
+  "StartAt": "Prepare",
+  "States": {
+    "Prepare": {
+      "Type": "Pass",
+      "Result": {
+        "status": "READY"
+      },
+      "ResultPath": "$.work",
+      "Next": "NextStep"
+    },
+    "NextStep": {
+      "Type": "Pass",
+      "Parameters": {
+        "orderId.$": "$.order.id",
+        "status.$": "$.work.status"
+      },
+      "End": true
+    }
+  }
+}

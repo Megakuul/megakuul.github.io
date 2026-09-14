@@ -1,0 +1,66 @@
+#cloud-config
+# Amazon Linux 2023; instance role: firehose:PutRecord on the delivery stream.
+package_update: true
+packages:
+- awscli-2
+ssh_pwauth: false
+disable_root: true
+users:
+- default
+- name: app
+  system: true
+  lock_passwd: true
+  shell: /sbin/nologin
+write_files:
+- path: /etc/app.env
+  owner: root:root
+  permissions: '0600'
+  content: |
+    AWS_DEFAULT_REGION=eu-central-1
+    DELIVERY_STREAM=my-firehose
+- path: /usr/local/bin/firehose-publish
+  owner: root:root
+  permissions: '0755'
+  content: |
+    #!/bin/bash
+    set -euo pipefail
+    export AWS_PAGER="" AWS_RETRY_MODE=standard AWS_MAX_ATTEMPTS=5
+    aws firehose put-record --delivery-stream-name "$DELIVERY_STREAM" --cli-binary-format raw-in-base64-out --record '{"Data":"{\"sensor\":\"sensor-1\",\"temperature\":23.5}\n"}'
+- path: /etc/systemd/system/firehose-publish.service
+  owner: root:root
+  permissions: '0644'
+  content: |
+    [Unit]
+    Description=Publish a record to Firehose
+    Wants=network-online.target
+    After=network-online.target
+
+    [Service]
+    Type=oneshot
+    User=app
+    Group=app
+    EnvironmentFile=/etc/app.env
+    ExecStart=/usr/local/bin/firehose-publish
+    TimeoutStartSec=50
+    NoNewPrivileges=true
+    PrivateTmp=true
+    ProtectSystem=strict
+    ProtectHome=true
+    UMask=0027
+- path: /etc/systemd/system/firehose-publish.timer
+  owner: root:root
+  permissions: '0644'
+  content: |
+    [Unit]
+    Description=Firehose record every minute
+
+    [Timer]
+    OnBootSec=30
+    OnUnitActiveSec=60
+    Unit=firehose-publish.service
+
+    [Install]
+    WantedBy=timers.target
+runcmd:
+- [systemctl, daemon-reload]
+- [systemctl, enable, --now, firehose-publish.timer]

@@ -1,0 +1,41 @@
+{
+  "QueryLanguage": "JSONPath",
+  "StartAt": "Init",
+  "States": {
+    "Init": {
+      "Type": "Pass",
+      "Result": {
+        "attempt": 0
+      },
+      "ResultPath": "$.poll",
+      "Next": "Wait"
+    },
+    "Wait": {
+      "Type": "Wait",
+      "Seconds": 1,
+      "Next": "Increment"
+    },
+    "Increment": {
+      "Type": "Pass",
+      "Parameters": {
+        "attempt.$": "States.MathAdd($.poll.attempt, 1)"
+      },
+      "ResultPath": "$.poll",
+      "Next": "Check"
+    },
+    "Check": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.poll.attempt",
+          "NumericGreaterThanEquals": 3,
+          "Next": "Done"
+        }
+      ],
+      "Default": "Wait"
+    },
+    "Done": {
+      "Type": "Succeed"
+    }
+  }
+}

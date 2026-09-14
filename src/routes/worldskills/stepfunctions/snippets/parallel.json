@@ -1,0 +1,51 @@
+{
+  "QueryLanguage": "JSONPath",
+  "StartAt": "CheckOrder",
+  "States": {
+    "CheckOrder": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "Stock",
+          "States": {
+            "Stock": {
+              "Type": "Pass",
+              "Parameters": {
+                "sku.$": "$.sku",
+                "available": true
+              },
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "Price",
+          "States": {
+            "Price": {
+              "Type": "Pass",
+              "Result": {
+                "amount": 42
+              },
+              "End": true
+            }
+          }
+        }
+      ],
+      "ResultSelector": {
+        "stock.$": "$[0]",
+        "price.$": "$[1]"
+      },
+      "ResultPath": "$.checks",
+      "Next": "Read"
+    },
+    "Read": {
+      "Type": "Pass",
+      "Parameters": {
+        "orderId.$": "$.orderId",
+        "available.$": "$.checks.stock.available",
+        "amount.$": "$.checks.price.amount"
+      },
+      "End": true
+    }
+  }
+}

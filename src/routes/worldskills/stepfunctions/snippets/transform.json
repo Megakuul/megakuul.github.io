@@ -1,0 +1,20 @@
+{
+  "QueryLanguage": "JSONata",
+  "StartAt": "Total",
+  "States": {
+    "Total": {
+      "Type": "Pass",
+      "Output": "{% $merge([$states.input, {\"total\": $sum([$states.input.items.(price * quantity)])}]) %}",
+      "Next": "Select"
+    },
+    "Select": {
+      "Type": "Pass",
+      "Output": {
+        "orderId": "{% $states.input.id %}",
+        "total": "{% $states.input.total %}",
+        "priority": "{% $exists($states.input.priority) and $states.input.priority != null ? $states.input.priority : \"normal\" %}"
+      },
+      "End": true
+    }
+  }
+}

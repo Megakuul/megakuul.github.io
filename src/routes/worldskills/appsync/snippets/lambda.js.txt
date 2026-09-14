@@ -1,0 +1,21 @@
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+  if (util.authType() !== 'User Pool Authorization' || !ctx.identity?.sub) {
+    util.unauthorized();
+  }
+  const owner = ctx.identity.sub;
+  return {
+    operation: 'Invoke',
+    payload: {
+      field: ctx.info.fieldName,
+      input: ctx.args.input,
+      owner,
+    },
+  };
+}
+
+export function response(ctx) {
+  if (ctx.error) util.error('Lambda request failed', ctx.error.type);
+  return JSON.stringify(ctx.result);
+}

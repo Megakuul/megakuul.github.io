@@ -8,14 +8,14 @@
           example: my-function
           required: true
           type: string
-          hint: ""
-          pattern: "[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"
+          hint: ''
+          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
         - name: ROLE_NAME
           example: my-app-role
           required: true
           type: string
           hint: Existing execution role; paste the required service permissions into its bound policy.
-          pattern: "[A-Za-z0-9+=,.@_-]{1,64}"
+          pattern: '[A-Za-z0-9+=,.@_-]{1,64}'
         - name: TAG_KEY
           example: Project
           required: true
@@ -85,12 +85,1017 @@
               Qualifier: $LATEST
               MaximumRetryAttempts: 2
               MaximumEventAgeInSeconds: 3600
+          LambdaInvokeAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Invoke this function, its versions and aliases.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action: lambda:InvokeFunction
+                    Resource:
+                      - Fn::GetAtt:
+                          - Function
+                          - Arn
+                      - Fn::Sub: ${Function.Arn}:*
         Outputs:
           FunctionArn:
             Value:
               Fn::GetAtt:
                 - Function
                 - Arn
+          LambdaInvokeAccessArn:
+            Description: 'Optional policy: Invoke this function, its versions and aliases. Attach to a role, user or group when needed.'
+            Value:
+              Ref: LambdaInvokeAccess
+    - id: service-http-api
+      title: HTTP API
+      env:
+        - name: NAME
+          example: my-http-api
+          required: true
+          type: string
+          pattern: '[a-z][a-z0-9-]{2,31}'
+          hint: 'Deployed live stage + Lambda: GET / and POST /items. IAM/SigV4 required; attach the output invoke policy to callers. Access/Lambda logs, detailed metrics, throttling and alarms. HTTP APIs have no execution logs, API X-Ray or WAF; Lambda tracing is enabled.'
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: http-api
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Description: 'Deployed live stage + Lambda: GET / and POST /items. IAM/SigV4 required; attach the output invoke policy to callers. Access/Lambda logs, detailed metrics, throttling and alarms. HTTP APIs have no execution logs, API X-Ray or WAF; Lambda tracing is enabled.'
+        Parameters:
+          Name:
+            Type: String
+            AllowedPattern: '[a-z][a-z0-9-]{2,31}'
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          AccessLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/apigateway/${Name}/http-api/access
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          BackendLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/lambda/${Name}-http-api
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          BackendRole:
+            Type: AWS::IAM::Role
+            Properties:
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: lambda.amazonaws.com
+                    Action: sts:AssumeRole
+              Policies:
+                - PolicyName: LogsAndTracing
+                  PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Effect: Allow
+                        Action:
+                          - logs:CreateLogStream
+                          - logs:PutLogEvents
+                        Resource:
+                          Fn::GetAtt:
+                            - BackendLogs
+                            - Arn
+                      - Effect: Allow
+                        Action:
+                          - xray:PutTraceSegments
+                          - xray:PutTelemetryRecords
+                        Resource: '*'
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Backend:
+            Type: AWS::Lambda::Function
+            Properties:
+              FunctionName:
+                Fn::Sub: ${Name}-http-api
+              Runtime: nodejs24.x
+              Handler: index.handler
+              Role:
+                Fn::GetAtt:
+                  - BackendRole
+                  - Arn
+              Code:
+                ZipFile: |-
+                  exports.handler = async (event, context) => {
+                    const method = event.requestContext?.http?.method ?? event.httpMethod;
+                    const path = event.resource ?? event.routeKey?.split(" ")[1] ?? event.rawPath ?? event.path;
+                    const reply = (statusCode, body) => {
+                      console.info({ requestId: context.awsRequestId, method, statusCode });
+                      return { statusCode, headers: {
+                        "content-type": "application/json", "cache-control": "no-store",
+                        "x-content-type-options": "nosniff", "strict-transport-security": "max-age=31536000"
+                      }, body: JSON.stringify(body) };
+                    };
+                    if (method === "GET" && path === "/") return reply(200, { status: "ok" });
+                    if (method !== "POST" || path !== "/items") return reply(404, { message: "Not found" });
+                    const type = Object.entries(event.headers ?? {}).find(([key]) => key.toLowerCase() === "content-type")?.[1];
+                    if (!type || type.split(";")[0].trim().toLowerCase() !== "application/json")
+                      return reply(415, { message: "Use application/json" });
+                    const raw = event.isBase64Encoded ? Buffer.from(event.body ?? "", "base64").toString("utf8") : event.body ?? "";
+                    if (Buffer.byteLength(raw) > 4096) return reply(413, { message: "Body too large" });
+                    let body;
+                    try { body = JSON.parse(raw); } catch { return reply(400, { message: "Invalid JSON" }); }
+                    if (!body || Array.isArray(body) || typeof body.message !== "string" ||
+                        body.message.length < 1 || body.message.length > 1000 || Object.keys(body).length !== 1)
+                      return reply(400, { message: "Expected message (1-1000 characters)" });
+                    return reply(200, { accepted: true });
+                  };
+              MemorySize: 256
+              Timeout: 10
+              Architectures:
+                - arm64
+              TracingConfig:
+                Mode: Active
+              LoggingConfig:
+                LogFormat: JSON
+                ApplicationLogLevel: INFO
+                SystemLogLevel: INFO
+                LogGroup:
+                  Ref: BackendLogs
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Api:
+            Type: AWS::ApiGatewayV2::Api
+            Properties:
+              Name:
+                Ref: Name
+              ProtocolType: HTTP
+              DisableExecuteApiEndpoint: false
+          Integration:
+            Type: AWS::ApiGatewayV2::Integration
+            Properties:
+              ApiId:
+                Ref: Api
+              IntegrationType: AWS_PROXY
+              IntegrationMethod: POST
+              IntegrationUri:
+                Fn::GetAtt:
+                  - Backend
+                  - Arn
+              PayloadFormatVersion: '2.0'
+              TimeoutInMillis: 12000
+          InvokeGet:
+            Type: AWS::Lambda::Permission
+            Properties:
+              FunctionName:
+                Ref: Backend
+              Action: lambda:InvokeFunction
+              Principal: apigateway.amazonaws.com
+              SourceAccount:
+                Ref: AWS::AccountId
+              SourceArn:
+                Fn::Sub: arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/live/GET/
+          InvokePost:
+            Type: AWS::Lambda::Permission
+            Properties:
+              FunctionName:
+                Ref: Backend
+              Action: lambda:InvokeFunction
+              Principal: apigateway.amazonaws.com
+              SourceAccount:
+                Ref: AWS::AccountId
+              SourceArn:
+                Fn::Sub: arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/live/POST/items
+          GetRoute:
+            Type: AWS::ApiGatewayV2::Route
+            Properties:
+              ApiId:
+                Ref: Api
+              RouteKey: GET /
+              AuthorizationType: AWS_IAM
+              Target:
+                Fn::Sub: integrations/${Integration}
+          PostRoute:
+            Type: AWS::ApiGatewayV2::Route
+            Properties:
+              ApiId:
+                Ref: Api
+              RouteKey: POST /items
+              AuthorizationType: AWS_IAM
+              Target:
+                Fn::Sub: integrations/${Integration}
+          Stage:
+            Type: AWS::ApiGatewayV2::Stage
+            DependsOn:
+              - GetRoute
+              - PostRoute
+              - InvokeGet
+              - InvokePost
+            Properties:
+              ApiId:
+                Ref: Api
+              StageName: live
+              AutoDeploy: true
+              AccessLogSettings:
+                DestinationArn:
+                  Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${AccessLogs}
+                Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","caller":"$context.identity.caller","user":"$context.identity.user","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","routeKey":"$context.routeKey","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","responseLatency":"$context.responseLatency","integrationStatus":"$context.integrationStatus","integrationLatency":"$context.integrationLatency"}'
+              DefaultRouteSettings:
+                DetailedMetricsEnabled: true
+                ThrottlingBurstLimit: 20
+                ThrottlingRateLimit: 10
+          InvokePolicy:
+            Type: AWS::IAM::ManagedPolicy
+            Properties:
+              Description: Attach to callers; sign requests with AWS SigV4.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action: execute-api:Invoke
+                    Resource:
+                      - Fn::Sub: arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/live/GET/
+                      - Fn::Sub: arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/live/POST/items
+          ServerErrors:
+            Type: AWS::CloudWatch::Alarm
+            Properties:
+              AlarmDescription: ServerErrors on the live API stage
+              Namespace: AWS/ApiGateway
+              MetricName: 5xx
+              Dimensions:
+                - Name: ApiId
+                  Value:
+                    Ref: Api
+                - Name: Stage
+                  Value: live
+              Statistic: Sum
+              Period: 60
+              EvaluationPeriods: 2
+              DatapointsToAlarm: 2
+              Threshold: 0
+              ComparisonOperator: GreaterThanThreshold
+              TreatMissingData: notBreaching
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          ClientErrors:
+            Type: AWS::CloudWatch::Alarm
+            Properties:
+              AlarmDescription: ClientErrors on the live API stage
+              Namespace: AWS/ApiGateway
+              MetricName: 4xx
+              Dimensions:
+                - Name: ApiId
+                  Value:
+                    Ref: Api
+                - Name: Stage
+                  Value: live
+              Statistic: Sum
+              Period: 60
+              EvaluationPeriods: 2
+              DatapointsToAlarm: 2
+              Threshold: 20
+              ComparisonOperator: GreaterThanThreshold
+              TreatMissingData: notBreaching
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Latency:
+            Type: AWS::CloudWatch::Alarm
+            Properties:
+              AlarmDescription: Latency on the live API stage
+              Namespace: AWS/ApiGateway
+              MetricName: Latency
+              Dimensions:
+                - Name: ApiId
+                  Value:
+                    Ref: Api
+                - Name: Stage
+                  Value: live
+              ExtendedStatistic: p95
+              Period: 60
+              EvaluationPeriods: 2
+              DatapointsToAlarm: 2
+              Threshold: 2000
+              ComparisonOperator: GreaterThanThreshold
+              TreatMissingData: notBreaching
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          BackendErrors:
+            Type: AWS::CloudWatch::Alarm
+            Properties:
+              AlarmDescription: Lambda errors or throttles
+              Metrics:
+                - Id: failures
+                  Expression: errors + throttles
+                  Label: Errors and throttles
+                  ReturnData: true
+                - Id: errors
+                  MetricStat:
+                    Metric:
+                      Namespace: AWS/Lambda
+                      MetricName: Errors
+                      Dimensions:
+                        - Name: FunctionName
+                          Value:
+                            Ref: Backend
+                    Period: 60
+                    Stat: Sum
+                  ReturnData: false
+                - Id: throttles
+                  MetricStat:
+                    Metric:
+                      Namespace: AWS/Lambda
+                      MetricName: Throttles
+                      Dimensions:
+                        - Name: FunctionName
+                          Value:
+                            Ref: Backend
+                    Period: 60
+                    Stat: Sum
+                  ReturnData: false
+              EvaluationPeriods: 1
+              Threshold: 0
+              ComparisonOperator: GreaterThanThreshold
+              TreatMissingData: notBreaching
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+        Outputs:
+          ApiUrl:
+            Description: IAM/SigV4 GET /; POST /items with application/json body {"message":"hello"}.
+            Value:
+              Fn::Sub: https://${Api}.execute-api.${AWS::Region}.${AWS::URLSuffix}/live/
+          InvokePolicyArn:
+            Description: Attach to the IAM caller. API keys are not authentication.
+            Value:
+              Ref: InvokePolicy
+          BackendName:
+            Value:
+              Ref: Backend
+          AccessLogGroup:
+            Value:
+              Ref: AccessLogs
+    - id: service-rest-api
+      title: REST API
+      env:
+        - name: NAME
+          example: my-rest-api
+          required: true
+          type: string
+          pattern: '[a-z][a-z0-9-]{2,31}'
+          hint: 'Deployed live stage + Lambda: GET / and POST /items. IAM/SigV4 required; attach the output invoke policy. Access/execution/Lambda/WAF logs, X-Ray, validation, throttling and alarms. Payload tracing and WAF request sampling stay off to protect secrets. Configures the regional REST logging role; manage that account setting in only one stack per region.'
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: rest-api
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Description: 'Deployed live stage + Lambda: GET / and POST /items. IAM/SigV4 required; attach the output invoke policy. Access/execution/Lambda/WAF logs, X-Ray, validation, throttling and alarms. Payload tracing and WAF request sampling stay off to protect secrets. Configures the regional REST logging role; manage that account setting in only one stack per region.'
+        Parameters:
+          Name:
+            Type: String
+            AllowedPattern: '[a-z][a-z0-9-]{2,31}'
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          AccessLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/apigateway/${Name}/rest-api/access
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          BackendLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/lambda/${Name}-rest-api
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          BackendRole:
+            Type: AWS::IAM::Role
+            Properties:
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: lambda.amazonaws.com
+                    Action: sts:AssumeRole
+              Policies:
+                - PolicyName: LogsAndTracing
+                  PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Effect: Allow
+                        Action:
+                          - logs:CreateLogStream
+                          - logs:PutLogEvents
+                        Resource:
+                          Fn::GetAtt:
+                            - BackendLogs
+                            - Arn
+                      - Effect: Allow
+                        Action:
+                          - xray:PutTraceSegments
+                          - xray:PutTelemetryRecords
+                        Resource: '*'
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Backend:
+            Type: AWS::Lambda::Function
+            Properties:
+              FunctionName:
+                Fn::Sub: ${Name}-rest-api
+              Runtime: nodejs24.x
+              Handler: index.handler
+              Role:
+                Fn::GetAtt:
+                  - BackendRole
+                  - Arn
+              Code:
+                ZipFile: |-
+                  exports.handler = async (event, context) => {
+                    const method = event.requestContext?.http?.method ?? event.httpMethod;
+                    const path = event.resource ?? event.routeKey?.split(" ")[1] ?? event.rawPath ?? event.path;
+                    const reply = (statusCode, body) => {
+                      console.info({ requestId: context.awsRequestId, method, statusCode });
+                      return { statusCode, headers: {
+                        "content-type": "application/json", "cache-control": "no-store",
+                        "x-content-type-options": "nosniff", "strict-transport-security": "max-age=31536000"
+                      }, body: JSON.stringify(body) };
+                    };
+                    if (method === "GET" && path === "/") return reply(200, { status: "ok" });
+                    if (method !== "POST" || path !== "/items") return reply(404, { message: "Not found" });
+                    const type = Object.entries(event.headers ?? {}).find(([key]) => key.toLowerCase() === "content-type")?.[1];
+                    if (!type || type.split(";")[0].trim().toLowerCase() !== "application/json")
+                      return reply(415, { message: "Use application/json" });
+                    const raw = event.isBase64Encoded ? Buffer.from(event.body ?? "", "base64").toString("utf8") : event.body ?? "";
+                    if (Buffer.byteLength(raw) > 4096) return reply(413, { message: "Body too large" });
+                    let body;
+                    try { body = JSON.parse(raw); } catch { return reply(400, { message: "Invalid JSON" }); }
+                    if (!body || Array.isArray(body) || typeof body.message !== "string" ||
+                        body.message.length < 1 || body.message.length > 1000 || Object.keys(body).length !== 1)
+                      return reply(400, { message: "Expected message (1-1000 characters)" });
+                    return reply(200, { accepted: true });
+                  };
+              MemorySize: 256
+              Timeout: 10
+              Architectures:
+                - arm64
+              TracingConfig:
+                Mode: Active
+              LoggingConfig:
+                LogFormat: JSON
+                ApplicationLogLevel: INFO
+                SystemLogLevel: INFO
+                LogGroup:
+                  Ref: BackendLogs
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Api:
+            Type: AWS::ApiGateway::RestApi
+            Properties:
+              Name:
+                Ref: Name
+              EndpointConfiguration:
+                Types:
+                  - REGIONAL
+              SecurityPolicy: SecurityPolicy_TLS13_1_2_PFS_PQ_2025_09
+              EndpointAccessMode: STRICT
+              DisableExecuteApiEndpoint: false
+              FailOnWarnings: true
+              Mode: overwrite
+              Body:
+                swagger: '2.0'
+                info:
+                  title:
+                    Ref: Name
+                  version: '1.0'
+                schemes:
+                  - https
+                produces:
+                  - application/json
+                securityDefinitions:
+                  sigv4:
+                    type: apiKey
+                    name: Authorization
+                    in: header
+                    x-amazon-apigateway-authtype: awsSigv4
+                security:
+                  - sigv4: []
+                x-amazon-apigateway-request-validators:
+                  Validate:
+                    validateRequestBody: true
+                    validateRequestParameters: true
+                x-amazon-apigateway-request-validator: Validate
+                definitions:
+                  Message:
+                    type: object
+                    required:
+                      - message
+                    additionalProperties: false
+                    properties:
+                      message:
+                        type: string
+                        minLength: 1
+                        maxLength: 1000
+                paths:
+                  /:
+                    get:
+                      responses:
+                        '200':
+                          description: OK
+                      x-amazon-apigateway-integration:
+                        type: aws_proxy
+                        httpMethod: POST
+                        uri:
+                          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Backend.Arn}/invocations
+                        timeoutInMillis: 12000
+                  /items:
+                    post:
+                      consumes:
+                        - application/json
+                      parameters:
+                        - name: body
+                          in: body
+                          required: true
+                          schema:
+                            $ref: '#/definitions/Message'
+                      responses:
+                        '200':
+                          description: Accepted
+                        '400':
+                          description: Invalid request
+                      x-amazon-apigateway-integration:
+                        type: aws_proxy
+                        httpMethod: POST
+                        uri:
+                          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Backend.Arn}/invocations
+                        timeoutInMillis: 12000
+                x-amazon-apigateway-security-policy: SecurityPolicy_TLS13_1_2_PFS_PQ_2025_09
+                x-amazon-apigateway-endpoint-access-mode: STRICT
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          InvokeGet:
+            Type: AWS::Lambda::Permission
+            Properties:
+              FunctionName:
+                Ref: Backend
+              Action: lambda:InvokeFunction
+              Principal: apigateway.amazonaws.com
+              SourceAccount:
+                Ref: AWS::AccountId
+              SourceArn:
+                Fn::Sub: arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/live/GET/
+          InvokePost:
+            Type: AWS::Lambda::Permission
+            Properties:
+              FunctionName:
+                Ref: Backend
+              Action: lambda:InvokeFunction
+              Principal: apigateway.amazonaws.com
+              SourceAccount:
+                Ref: AWS::AccountId
+              SourceArn:
+                Fn::Sub: arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/live/POST/items
+          ExecutionLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: API-Gateway-Execution-Logs_${Api}/live
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          LoggingRole:
+            Type: AWS::IAM::Role
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Regional API Gateway logging role; retained because the account setting outlives stacks.
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: apigateway.amazonaws.com
+                    Action: sts:AssumeRole
+              Policies:
+                - PolicyName: RegionalApiLogs
+                  PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Effect: Allow
+                        Action: logs:DescribeLogGroups
+                        Resource: '*'
+                      - Effect: Allow
+                        Action:
+                          - logs:CreateLogGroup
+                          - logs:CreateLogStream
+                          - logs:DescribeLogStreams
+                          - logs:PutLogEvents
+                          - logs:GetLogEvents
+                          - logs:FilterLogEvents
+                        Resource:
+                          Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          LoggingAccount:
+            Type: AWS::ApiGateway::Account
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              CloudWatchRoleArn:
+                Fn::GetAtt:
+                  - LoggingRole
+                  - Arn
+          DeploymentV1:
+            Type: AWS::ApiGateway::Deployment
+            DependsOn:
+              - InvokeGet
+              - InvokePost
+            Properties:
+              RestApiId:
+                Ref: Api
+              Description: Initial routes. Change this resource logical ID when updating the OpenAPI definition.
+          Stage:
+            Type: AWS::ApiGateway::Stage
+            DependsOn:
+              - LoggingAccount
+              - ExecutionLogs
+            Properties:
+              RestApiId:
+                Ref: Api
+              StageName: live
+              DeploymentId:
+                Ref: DeploymentV1
+              TracingEnabled: true
+              CacheClusterEnabled: false
+              AccessLogSetting:
+                DestinationArn:
+                  Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${AccessLogs}
+                Format: '{"requestId":"$context.requestId","extendedRequestId":"$context.extendedRequestId","ip":"$context.identity.sourceIp","caller":"$context.identity.caller","user":"$context.identity.user","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","responseLatency":"$context.responseLatency","integrationStatus":"$context.integration.status","integrationLatency":"$context.integration.latency","wafResponseCode":"$context.wafResponseCode","xrayTraceId":"$context.xrayTraceId","tlsVersion":"$context.tlsVersion","cipherSuite":"$context.cipherSuite"}'
+              MethodSettings:
+                - HttpMethod: '*'
+                  ResourcePath: /*
+                  LoggingLevel: INFO
+                  DataTraceEnabled: false
+                  MetricsEnabled: true
+                  ThrottlingBurstLimit: 20
+                  ThrottlingRateLimit: 10
+                  CachingEnabled: false
+                  CacheDataEncrypted: true
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          WebACL:
+            Type: AWS::WAFv2::WebACL
+            Properties:
+              Name:
+                Fn::Sub: ${Name}-rest-api
+              Scope: REGIONAL
+              DefaultAction:
+                Allow: {}
+              VisibilityConfig:
+                CloudWatchMetricsEnabled: true
+                SampledRequestsEnabled: false
+                MetricName: AllRequests
+              Rules:
+                - Name: AWSManagedRulesAmazonIpReputationList
+                  Priority: 0
+                  Statement:
+                    ManagedRuleGroupStatement:
+                      VendorName: AWS
+                      Name: AWSManagedRulesAmazonIpReputationList
+                  OverrideAction:
+                    None: {}
+                  VisibilityConfig:
+                    CloudWatchMetricsEnabled: true
+                    SampledRequestsEnabled: false
+                    MetricName: AWSManagedRulesAmazonIpReputationList
+                - Name: AWSManagedRulesCommonRuleSet
+                  Priority: 1
+                  Statement:
+                    ManagedRuleGroupStatement:
+                      VendorName: AWS
+                      Name: AWSManagedRulesCommonRuleSet
+                  OverrideAction:
+                    None: {}
+                  VisibilityConfig:
+                    CloudWatchMetricsEnabled: true
+                    SampledRequestsEnabled: false
+                    MetricName: AWSManagedRulesCommonRuleSet
+                - Name: AWSManagedRulesKnownBadInputsRuleSet
+                  Priority: 2
+                  Statement:
+                    ManagedRuleGroupStatement:
+                      VendorName: AWS
+                      Name: AWSManagedRulesKnownBadInputsRuleSet
+                  OverrideAction:
+                    None: {}
+                  VisibilityConfig:
+                    CloudWatchMetricsEnabled: true
+                    SampledRequestsEnabled: false
+                    MetricName: AWSManagedRulesKnownBadInputsRuleSet
+                - Name: AWSManagedRulesSQLiRuleSet
+                  Priority: 3
+                  Statement:
+                    ManagedRuleGroupStatement:
+                      VendorName: AWS
+                      Name: AWSManagedRulesSQLiRuleSet
+                  OverrideAction:
+                    None: {}
+                  VisibilityConfig:
+                    CloudWatchMetricsEnabled: true
+                    SampledRequestsEnabled: false
+                    MetricName: AWSManagedRulesSQLiRuleSet
+                - Name: RateLimit
+                  Priority: 10
+                  Action:
+                    Block: {}
+                  Statement:
+                    RateBasedStatement:
+                      Limit: 1000
+                      EvaluationWindowSec: 300
+                      AggregateKeyType: IP
+                  VisibilityConfig:
+                    CloudWatchMetricsEnabled: true
+                    SampledRequestsEnabled: false
+                    MetricName: RateLimit
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          WafLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: aws-waf-logs-${Name}-rest-api
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          WafLogging:
+            Type: AWS::WAFv2::LoggingConfiguration
+            Properties:
+              ResourceArn:
+                Fn::GetAtt:
+                  - WebACL
+                  - Arn
+              LogDestinationConfigs:
+                - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${WafLogs}
+              RedactedFields:
+                - SingleHeader:
+                    Name: authorization
+                - SingleHeader:
+                    Name: cookie
+                - SingleHeader:
+                    Name: x-api-key
+                - SingleHeader:
+                    Name: x-amz-security-token
+                - QueryString: {}
+          WafAssociation:
+            Type: AWS::WAFv2::WebACLAssociation
+            DependsOn:
+              - Stage
+              - WafLogging
+            Properties:
+              WebACLArn:
+                Fn::GetAtt:
+                  - WebACL
+                  - Arn
+              ResourceArn:
+                Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}::/restapis/${Api}/stages/live
+          InvokePolicy:
+            Type: AWS::IAM::ManagedPolicy
+            Properties:
+              Description: Attach to callers; sign requests with AWS SigV4.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action: execute-api:Invoke
+                    Resource:
+                      - Fn::Sub: arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/live/GET/
+                      - Fn::Sub: arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/live/POST/items
+          ServerErrors:
+            Type: AWS::CloudWatch::Alarm
+            Properties:
+              AlarmDescription: ServerErrors on the live API stage
+              Namespace: AWS/ApiGateway
+              MetricName: 5XXError
+              Dimensions:
+                - Name: ApiName
+                  Value:
+                    Ref: Name
+                - Name: Stage
+                  Value: live
+              Statistic: Sum
+              Period: 60
+              EvaluationPeriods: 2
+              DatapointsToAlarm: 2
+              Threshold: 0
+              ComparisonOperator: GreaterThanThreshold
+              TreatMissingData: notBreaching
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          ClientErrors:
+            Type: AWS::CloudWatch::Alarm
+            Properties:
+              AlarmDescription: ClientErrors on the live API stage
+              Namespace: AWS/ApiGateway
+              MetricName: 4XXError
+              Dimensions:
+                - Name: ApiName
+                  Value:
+                    Ref: Name
+                - Name: Stage
+                  Value: live
+              Statistic: Sum
+              Period: 60
+              EvaluationPeriods: 2
+              DatapointsToAlarm: 2
+              Threshold: 20
+              ComparisonOperator: GreaterThanThreshold
+              TreatMissingData: notBreaching
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Latency:
+            Type: AWS::CloudWatch::Alarm
+            Properties:
+              AlarmDescription: Latency on the live API stage
+              Namespace: AWS/ApiGateway
+              MetricName: Latency
+              Dimensions:
+                - Name: ApiName
+                  Value:
+                    Ref: Name
+                - Name: Stage
+                  Value: live
+              ExtendedStatistic: p95
+              Period: 60
+              EvaluationPeriods: 2
+              DatapointsToAlarm: 2
+              Threshold: 2000
+              ComparisonOperator: GreaterThanThreshold
+              TreatMissingData: notBreaching
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          BackendErrors:
+            Type: AWS::CloudWatch::Alarm
+            Properties:
+              AlarmDescription: Lambda errors or throttles
+              Metrics:
+                - Id: failures
+                  Expression: errors + throttles
+                  Label: Errors and throttles
+                  ReturnData: true
+                - Id: errors
+                  MetricStat:
+                    Metric:
+                      Namespace: AWS/Lambda
+                      MetricName: Errors
+                      Dimensions:
+                        - Name: FunctionName
+                          Value:
+                            Ref: Backend
+                    Period: 60
+                    Stat: Sum
+                  ReturnData: false
+                - Id: throttles
+                  MetricStat:
+                    Metric:
+                      Namespace: AWS/Lambda
+                      MetricName: Throttles
+                      Dimensions:
+                        - Name: FunctionName
+                          Value:
+                            Ref: Backend
+                    Period: 60
+                    Stat: Sum
+                  ReturnData: false
+              EvaluationPeriods: 1
+              Threshold: 0
+              ComparisonOperator: GreaterThanThreshold
+              TreatMissingData: notBreaching
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+        Outputs:
+          ApiUrl:
+            Description: IAM/SigV4 GET /; POST /items with application/json body {"message":"hello"}.
+            Value:
+              Fn::Sub: https://${Api}.execute-api.${AWS::Region}.${AWS::URLSuffix}/live/
+          InvokePolicyArn:
+            Description: Attach to the IAM caller. API keys are not authentication.
+            Value:
+              Ref: InvokePolicy
+          BackendName:
+            Value:
+              Ref: Backend
+          AccessLogGroup:
+            Value:
+              Ref: AccessLogs
     - id: service-s3
       title: S3
       env:
@@ -98,8 +1103,8 @@
           example: my-app-bucket-111122223333
           required: true
           type: string
-          hint: ""
-          pattern: "[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]"
+          hint: ''
+          pattern: '[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]'
         - name: TAG_KEY
           example: Project
           required: true
@@ -145,7 +1150,7 @@
                     AbortIncompleteMultipartUpload:
                       DaysAfterInitiation: 7
                   - Id: OldVersions
-                    Prefix: ""
+                    Prefix: ''
                     Status: Enabled
                     NoncurrentVersionExpiration:
                       NoncurrentDays: 90
@@ -167,7 +1172,7 @@
                 Version: 2012-10-17
                 Statement:
                   - Effect: Deny
-                    Principal: "*"
+                    Principal: '*'
                     Action: s3:*
                     Resource:
                       - Fn::GetAtt:
@@ -176,8 +1181,8 @@
                       - Fn::Sub: ${AccessLogs.Arn}/*
                     Condition:
                       Bool:
-                        aws:SecureTransport: "false"
-                        aws:PrincipalIsAWSService: "false"
+                        aws:SecureTransport: 'false'
+                        aws:PrincipalIsAWSService: 'false'
                   - Effect: Allow
                     Principal:
                       Service: logging.s3.amazonaws.com
@@ -219,7 +1224,7 @@
                     AbortIncompleteMultipartUpload:
                       DaysAfterInitiation: 7
                   - Id: OldVersions
-                    Prefix: ""
+                    Prefix: ''
                     Status: Enabled
                     NoncurrentVersionExpiration:
                       NoncurrentDays: 90
@@ -243,7 +1248,7 @@
                 Version: 2012-10-17
                 Statement:
                   - Effect: Deny
-                    Principal: "*"
+                    Principal: '*'
                     Action: s3:*
                     Resource:
                       - Fn::GetAtt:
@@ -252,20 +1257,101 @@
                       - Fn::Sub: ${Bucket.Arn}/*
                     Condition:
                       Bool:
-                        aws:SecureTransport: "false"
-                        aws:PrincipalIsAWSService: "false"
+                        aws:SecureTransport: 'false'
+                        aws:PrincipalIsAWSService: 'false'
                   - Effect: Deny
-                    Principal: "*"
+                    Principal: '*'
                     Action: s3:PutObject
                     Resource:
                       Fn::Sub: ${Bucket.Arn}/*
                     Condition:
-                      "Null":
-                        s3:x-amz-server-side-encryption-customer-algorithm: "false"
+                      'Null':
+                        s3:x-amz-server-side-encryption-customer-algorithm: 'false'
+          S3ReadAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Read and list objects and versions in this bucket.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - s3:GetBucketLocation
+                    Resource:
+                      Fn::GetAtt:
+                        - Bucket
+                        - Arn
+                  - Effect: Allow
+                    Action:
+                      - s3:ListBucket
+                      - s3:ListBucketVersions
+                    Resource:
+                      Fn::GetAtt:
+                        - Bucket
+                        - Arn
+                  - Effect: Allow
+                    Action:
+                      - s3:GetObject
+                      - s3:GetObjectVersion
+                    Resource:
+                      Fn::Sub: ${Bucket.Arn}/*
+          S3WriteAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Upload objects and manage multipart uploads in this bucket.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - s3:GetBucketLocation
+                      - s3:ListBucketMultipartUploads
+                    Resource:
+                      Fn::GetAtt:
+                        - Bucket
+                        - Arn
+                  - Effect: Allow
+                    Action:
+                      - s3:PutObject
+                      - s3:AbortMultipartUpload
+                      - s3:ListMultipartUploadParts
+                    Resource:
+                      Fn::Sub: ${Bucket.Arn}/*
+          S3DeleteAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Delete objects and specific versions in this bucket.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - s3:DeleteObject
+                      - s3:DeleteObjectVersion
+                    Resource:
+                      Fn::Sub: ${Bucket.Arn}/*
         Outputs:
           Bucket:
             Value:
               Ref: Bucket
+          S3ReadAccessArn:
+            Description: 'Optional policy: Read and list objects and versions in this bucket. Attach to a role, user or group when needed.'
+            Value:
+              Ref: S3ReadAccess
+          S3WriteAccessArn:
+            Description: 'Optional policy: Upload objects and manage multipart uploads in this bucket. Attach to a role, user or group when needed.'
+            Value:
+              Ref: S3WriteAccess
+          S3DeleteAccessArn:
+            Description: 'Optional policy: Delete objects and specific versions in this bucket. Attach to a role, user or group when needed.'
+            Value:
+              Ref: S3DeleteAccess
     - id: service-sqs
       title: SQS
       env:
@@ -346,7 +1432,7 @@
                 Version: 2012-10-17
                 Statement:
                   - Effect: Deny
-                    Principal: "*"
+                    Principal: '*'
                     Action: sqs:*
                     Resource:
                       - Fn::GetAtt:
@@ -357,8 +1443,66 @@
                           - Arn
                     Condition:
                       Bool:
-                        aws:SecureTransport: "false"
-                        aws:PrincipalIsAWSService: "false"
+                        aws:SecureTransport: 'false'
+                        aws:PrincipalIsAWSService: 'false'
+          SqsPublishAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Send messages to this queue, including batch sends.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - sqs:SendMessage
+                      - sqs:GetQueueUrl
+                      - sqs:GetQueueAttributes
+                    Resource:
+                      Fn::GetAtt:
+                        - Queue
+                        - Arn
+          SqsReceiveAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Receive, acknowledge and change visibility of messages in this queue.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - sqs:ReceiveMessage
+                      - sqs:DeleteMessage
+                      - sqs:ChangeMessageVisibility
+                      - sqs:GetQueueUrl
+                      - sqs:GetQueueAttributes
+                    Resource:
+                      Fn::GetAtt:
+                        - Queue
+                        - Arn
+          SqsDlqReceiveAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Inspect and acknowledge messages in the dead-letter queue.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - sqs:ReceiveMessage
+                      - sqs:DeleteMessage
+                      - sqs:ChangeMessageVisibility
+                      - sqs:GetQueueUrl
+                      - sqs:GetQueueAttributes
+                    Resource:
+                      Fn::GetAtt:
+                        - DLQ
+                        - Arn
         Outputs:
           QueueArn:
             Value:
@@ -370,6 +1514,18 @@
               Fn::GetAtt:
                 - DLQ
                 - Arn
+          SqsPublishAccessArn:
+            Description: 'Optional policy: Send messages to this queue, including batch sends. Attach to a role, user or group when needed.'
+            Value:
+              Ref: SqsPublishAccess
+          SqsReceiveAccessArn:
+            Description: 'Optional policy: Receive, acknowledge and change visibility of messages in this queue. Attach to a role, user or group when needed.'
+            Value:
+              Ref: SqsReceiveAccess
+          SqsDlqReceiveAccessArn:
+            Description: 'Optional policy: Inspect and acknowledge messages in the dead-letter queue. Attach to a role, user or group when needed.'
+            Value:
+              Ref: SqsDlqReceiveAccess
     - id: service-sns
       title: SNS
       env:
@@ -377,8 +1533,8 @@
           example: my-topic
           required: true
           type: string
-          hint: ""
-          pattern: "[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"
+          hint: ''
+          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
         - name: TAG_KEY
           example: Project
           required: true
@@ -420,18 +1576,193 @@
                 Version: 2012-10-17
                 Statement:
                   - Effect: Deny
-                    Principal: "*"
+                    Principal: '*'
                     Action: sns:*
                     Resource:
                       Ref: Topic
                     Condition:
                       Bool:
-                        aws:SecureTransport: "false"
-                        aws:PrincipalIsAWSService: "false"
+                        aws:SecureTransport: 'false'
+                        aws:PrincipalIsAWSService: 'false'
+          SnsPublishAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Publish to this encrypted topic with its AWS-managed SNS key.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - sns:Publish
+                      - sns:GetTopicAttributes
+                    Resource:
+                      Ref: Topic
+                  - Effect: Allow
+                    Action:
+                      - kms:GenerateDataKey
+                      - kms:Decrypt
+                    Resource:
+                      Fn::Sub: arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/*
+                    Condition:
+                      StringEquals:
+                        kms:ViaService:
+                          Fn::Sub: sns.${AWS::Region}.${AWS::URLSuffix}
+                        kms:CallerAccount:
+                          Ref: AWS::AccountId
+                        kms:EncryptionContext:aws:sns:topicArn:
+                          Ref: Topic
+                      ForAnyValue:StringEquals:
+                        kms:ResourceAliases: alias/aws/sns
         Outputs:
           TopicArn:
             Value:
               Ref: Topic
+          SnsPublishAccessArn:
+            Description: 'Optional policy: Publish to this encrypted topic with its AWS-managed SNS key. Attach to a role, user or group when needed.'
+            Value:
+              Ref: SnsPublishAccess
+    - id: service-dynamodb
+      title: DynamoDB
+      env:
+        - name: NAME
+          example: my-table
+          required: true
+          type: string
+          hint: String partition key pk and sort key sk. On-demand capacity, AWS-owned encryption, 35-day recovery and deletion protection.
+          pattern: '[A-Za-z0-9_.-]{3,64}'
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: dynamodb
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Description: On-demand table with string pk/sk keys, AWS-owned encryption, 35-day point-in-time recovery, deletion protection and HTTPS-only access.
+        Parameters:
+          Name:
+            Type: String
+            AllowedPattern: '[A-Za-z0-9_.-]{3,64}'
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Table:
+            Type: AWS::DynamoDB::Table
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              TableName:
+                Ref: Name
+              BillingMode: PAY_PER_REQUEST
+              TableClass: STANDARD
+              AttributeDefinitions:
+                - AttributeName: pk
+                  AttributeType: S
+                - AttributeName: sk
+                  AttributeType: S
+              KeySchema:
+                - AttributeName: pk
+                  KeyType: HASH
+                - AttributeName: sk
+                  KeyType: RANGE
+              SSESpecification:
+                SSEEnabled: false
+              PointInTimeRecoverySpecification:
+                PointInTimeRecoveryEnabled: true
+                RecoveryPeriodInDays: 35
+              DeletionProtectionEnabled: true
+              ResourcePolicy:
+                PolicyDocument:
+                  Version: 2012-10-17
+                  Statement:
+                    - Sid: RequireTLS
+                      Effect: Deny
+                      Principal: '*'
+                      Action: dynamodb:*
+                      Resource:
+                        - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Name}
+                        - Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Name}/index/*
+                      Condition:
+                        Bool:
+                          aws:SecureTransport: 'false'
+                          aws:PrincipalIsAWSService: 'false'
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          DynamoReadAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Read, query and scan this table and its indexes.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - dynamodb:GetItem
+                      - dynamodb:BatchGetItem
+                      - dynamodb:DescribeTable
+                    Resource:
+                      Fn::GetAtt:
+                        - Table
+                        - Arn
+                  - Effect: Allow
+                    Action:
+                      - dynamodb:Query
+                      - dynamodb:Scan
+                    Resource:
+                      - Fn::GetAtt:
+                          - Table
+                          - Arn
+                      - Fn::Sub: ${Table.Arn}/index/*
+          DynamoWriteAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Create, update and delete items, including batch and transactional writes.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - dynamodb:PutItem
+                      - dynamodb:UpdateItem
+                      - dynamodb:DeleteItem
+                      - dynamodb:BatchWriteItem
+                      - dynamodb:ConditionCheckItem
+                      - dynamodb:DescribeTable
+                    Resource:
+                      Fn::GetAtt:
+                        - Table
+                        - Arn
+        Outputs:
+          TableName:
+            Value:
+              Ref: Table
+          TableArn:
+            Value:
+              Fn::GetAtt:
+                - Table
+                - Arn
+          DynamoReadAccessArn:
+            Description: 'Optional policy: Read, query and scan this table and its indexes. Attach to a role, user or group when needed.'
+            Value:
+              Ref: DynamoReadAccess
+          DynamoWriteAccessArn:
+            Description: 'Optional policy: Create, update and delete items, including batch and transactional writes. Attach to a role, user or group when needed.'
+            Value:
+              Ref: DynamoWriteAccess
     - id: service-eventbridge
       title: EventBridge
       env:
@@ -439,8 +1770,8 @@
           example: my-event-bus
           required: true
           type: string
-          hint: ""
-          pattern: "[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"
+          hint: ''
+          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
         - name: TAG_KEY
           example: Project
           required: true
@@ -472,12 +1803,31 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
+          EventPublishAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Publish events to this event bus.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action: events:PutEvents
+                    Resource:
+                      Fn::GetAtt:
+                        - Bus
+                        - Arn
         Outputs:
           BusArn:
             Value:
               Fn::GetAtt:
                 - Bus
                 - Arn
+          EventPublishAccessArn:
+            Description: 'Optional policy: Publish events to this event bus. Attach to a role, user or group when needed.'
+            Value:
+              Ref: EventPublishAccess
     - id: service-ecr
       title: ECR
       env:
@@ -485,8 +1835,8 @@
           example: my-app/backend
           required: true
           type: string
-          hint: ""
-          pattern: "[a-z0-9]+(?:[._/-][a-z0-9]+)*"
+          hint: ''
+          pattern: '[a-z0-9]+(?:[._/-][a-z0-9]+)*'
         - name: TAG_KEY
           example: Project
           required: true
@@ -525,12 +1875,74 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
+          EcrPullAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Authenticate and pull images from this repository.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action: ecr:GetAuthorizationToken
+                    Resource: '*'
+                    Condition:
+                      StringEquals:
+                        aws:RequestedRegion:
+                          Ref: AWS::Region
+                  - Effect: Allow
+                    Action:
+                      - ecr:BatchCheckLayerAvailability
+                      - ecr:GetDownloadUrlForLayer
+                      - ecr:BatchGetImage
+                    Resource:
+                      Fn::GetAtt:
+                        - Repository
+                        - Arn
+          EcrPushAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Authenticate, pull and push images in this repository.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action: ecr:GetAuthorizationToken
+                    Resource: '*'
+                    Condition:
+                      StringEquals:
+                        aws:RequestedRegion:
+                          Ref: AWS::Region
+                  - Effect: Allow
+                    Action:
+                      - ecr:BatchCheckLayerAvailability
+                      - ecr:GetDownloadUrlForLayer
+                      - ecr:BatchGetImage
+                      - ecr:InitiateLayerUpload
+                      - ecr:UploadLayerPart
+                      - ecr:CompleteLayerUpload
+                      - ecr:PutImage
+                    Resource:
+                      Fn::GetAtt:
+                        - Repository
+                        - Arn
         Outputs:
           RepositoryArn:
             Value:
               Fn::GetAtt:
                 - Repository
                 - Arn
+          EcrPullAccessArn:
+            Description: 'Optional policy: Authenticate and pull images from this repository. Attach to a role, user or group when needed.'
+            Value:
+              Ref: EcrPullAccess
+          EcrPushAccessArn:
+            Description: 'Optional policy: Authenticate, pull and push images in this repository. Attach to a role, user or group when needed.'
+            Value:
+              Ref: EcrPushAccess
     - id: service-ecs
       title: ECS
       env:
@@ -538,8 +1950,8 @@
           example: my-cluster
           required: true
           type: string
-          hint: ""
-          pattern: "[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"
+          hint: Enhanced Insights and 30-day Insights/Exec logs. Configure task roles, container security and service networking separately.
+          pattern: '[A-Za-z0-9_-]{1,64}'
         - name: TAG_KEY
           example: Project
           required: true
@@ -549,9 +1961,11 @@
       templateName: ecs
       template:
         AWSTemplateFormatVersion: 2010-09-09
+        Description: Fargate cluster with enhanced Container Insights and retained, protected 30-day performance/Exec logs. Task definitions, service networking, application logging and ECS Exec task permissions must be configured with the workload.
         Parameters:
           Name:
             Type: String
+            AllowedPattern: '[A-Za-z0-9_-]{1,64}'
           TagKey:
             Type: String
             Default: Project
@@ -573,8 +1987,23 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
+          InsightsLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/ecs/containerinsights/${Name}/performance
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
           Cluster:
             Type: AWS::ECS::Cluster
+            DependsOn: InsightsLogs
             DeletionPolicy: Retain
             UpdateReplacePolicy: Retain
             Properties:
@@ -601,12 +2030,67 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
+          EcsRunAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Run NAME-prefixed task families in this cluster; pass only NAME-prefixed task roles.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action: ecs:RunTask
+                    Resource:
+                      Fn::Sub: arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${Name}-*:*
+                    Condition:
+                      ArnEquals:
+                        ecs:cluster:
+                          Fn::GetAtt:
+                            - Cluster
+                            - Arn
+                  - Effect: Allow
+                    Action: iam:PassRole
+                    Resource:
+                      Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${Name}-*
+                    Condition:
+                      StringEquals:
+                        iam:PassedToService: ecs-tasks.amazonaws.com
+          EcsTasksAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Describe this cluster and inspect or stop its tasks.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action: ecs:DescribeClusters
+                    Resource:
+                      Fn::GetAtt:
+                        - Cluster
+                        - Arn
+                  - Effect: Allow
+                    Action:
+                      - ecs:DescribeTasks
+                      - ecs:StopTask
+                    Resource:
+                      Fn::Sub: arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/${Name}/*
         Outputs:
           ClusterArn:
             Value:
               Fn::GetAtt:
                 - Cluster
                 - Arn
+          EcsRunAccessArn:
+            Description: 'Optional policy: Run NAME-prefixed task families in this cluster; pass only NAME-prefixed task roles. Attach to a role, user or group when needed.'
+            Value:
+              Ref: EcsRunAccess
+          EcsTasksAccessArn:
+            Description: 'Optional policy: Describe this cluster and inspect or stop its tasks. Attach to a role, user or group when needed.'
+            Value:
+              Ref: EcsTasksAccess
     - id: service-logs
       title: CloudWatch Logs
       env:
@@ -614,7 +2098,7 @@
           example: /app/my-app
           required: true
           type: string
-          hint: ""
+          hint: ''
           pattern: "[.\\-_/#A-Za-z0-9]{1,512}"
         - name: TAG_KEY
           example: Project
@@ -649,10 +2133,55 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
+          LogsReadAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Read streams and filter events in this log group.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - logs:DescribeLogStreams
+                      - logs:FilterLogEvents
+                    Resource:
+                      - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${Logs}
+                      - Fn::GetAtt:
+                          - Logs
+                          - Arn
+                  - Effect: Allow
+                    Action: logs:GetLogEvents
+                    Resource:
+                      Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${Logs}:log-stream:*
+          LogsWriteAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Create streams and write events in this log group.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - logs:CreateLogStream
+                      - logs:PutLogEvents
+                    Resource:
+                      Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${Logs}:log-stream:*
         Outputs:
           LogGroup:
             Value:
               Ref: Logs
+          LogsReadAccessArn:
+            Description: 'Optional policy: Read streams and filter events in this log group. Attach to a role, user or group when needed.'
+            Value:
+              Ref: LogsReadAccess
+          LogsWriteAccessArn:
+            Description: 'Optional policy: Create streams and write events in this log group. Attach to a role, user or group when needed.'
+            Value:
+              Ref: LogsWriteAccess
     - id: service-secret
       title: Secrets Manager
       env:
@@ -660,8 +2189,8 @@
           example: my-app/database
           required: true
           type: string
-          hint: ""
-          pattern: "[A-Za-z0-9/_+=.@-]{1,512}"
+          hint: ''
+          pattern: '[A-Za-z0-9/_+=.@-]{1,512}'
         - name: TAG_KEY
           example: Project
           required: true
@@ -693,10 +2222,49 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
+          SecretReadAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Read the value and metadata of this secret.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - secretsmanager:GetSecretValue
+                      - secretsmanager:DescribeSecret
+                    Resource:
+                      Ref: Secret
+          SecretWriteAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Write secret values and manage version stages for this secret.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - secretsmanager:PutSecretValue
+                      - secretsmanager:UpdateSecretVersionStage
+                      - secretsmanager:DescribeSecret
+                    Resource:
+                      Ref: Secret
         Outputs:
           SecretArn:
             Value:
               Ref: Secret
+          SecretReadAccessArn:
+            Description: 'Optional policy: Read the value and metadata of this secret. Attach to a role, user or group when needed.'
+            Value:
+              Ref: SecretReadAccess
+          SecretWriteAccessArn:
+            Description: 'Optional policy: Write secret values and manage version stages for this secret. Attach to a role, user or group when needed.'
+            Value:
+              Ref: SecretWriteAccess
     - id: service-appconfig
       title: AppConfig
       env:
@@ -704,8 +2272,8 @@
           example: my-app
           required: true
           type: string
-          hint: ""
-          pattern: "[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"
+          hint: ''
+          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
         - name: TAG_KEY
           example: Project
           required: true
@@ -777,6 +2345,52 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
+          AppConfigReadAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Poll the created environment and configuration profile.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - appconfig:StartConfigurationSession
+                      - appconfig:GetLatestConfiguration
+                    Resource:
+                      Fn::Sub: arn:${AWS::Partition}:appconfig:${AWS::Region}:${AWS::AccountId}:application/${Application}/environment/${Environment}/configuration/${Profile}
+          AppConfigDeployAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Publish hosted versions and deploy them with the created strategy.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - appconfig:CreateHostedConfigurationVersion
+                      - appconfig:GetHostedConfigurationVersion
+                    Resource:
+                      - Fn::Sub: arn:${AWS::Partition}:appconfig:${AWS::Region}:${AWS::AccountId}:application/${Application}
+                      - Fn::Sub: arn:${AWS::Partition}:appconfig:${AWS::Region}:${AWS::AccountId}:application/${Application}/configurationprofile/${Profile}
+                  - Effect: Allow
+                    Action: appconfig:StartDeployment
+                    Resource:
+                      - Fn::Sub: arn:${AWS::Partition}:appconfig:${AWS::Region}:${AWS::AccountId}:application/${Application}
+                      - Fn::Sub: arn:${AWS::Partition}:appconfig:${AWS::Region}:${AWS::AccountId}:application/${Application}/configurationprofile/${Profile}
+                      - Fn::Sub: arn:${AWS::Partition}:appconfig:${AWS::Region}:${AWS::AccountId}:application/${Application}/environment/${Environment}
+                      - Fn::Sub: arn:${AWS::Partition}:appconfig:${AWS::Region}:${AWS::AccountId}:deploymentstrategy/${Strategy}
+                  - Effect: Allow
+                    Action:
+                      - appconfig:GetDeployment
+                      - appconfig:StopDeployment
+                    Resource:
+                      - Fn::Sub: arn:${AWS::Partition}:appconfig:${AWS::Region}:${AWS::AccountId}:application/${Application}
+                      - Fn::Sub: arn:${AWS::Partition}:appconfig:${AWS::Region}:${AWS::AccountId}:application/${Application}/environment/${Environment}
+                      - Fn::Sub: arn:${AWS::Partition}:appconfig:${AWS::Region}:${AWS::AccountId}:application/${Application}/environment/${Environment}/deployment/*
         Outputs:
           ApplicationId:
             Value:
@@ -787,6 +2401,14 @@
           ProfileId:
             Value:
               Ref: Profile
+          AppConfigReadAccessArn:
+            Description: 'Optional policy: Poll the created environment and configuration profile. Attach to a role, user or group when needed.'
+            Value:
+              Ref: AppConfigReadAccess
+          AppConfigDeployAccessArn:
+            Description: 'Optional policy: Publish hosted versions and deploy them with the created strategy. Attach to a role, user or group when needed.'
+            Value:
+              Ref: AppConfigDeployAccess
     - id: service-states
       title: Step Functions
       env:
@@ -794,14 +2416,14 @@
           example: my-workflow
           required: true
           type: string
-          hint: ""
-          pattern: "[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"
+          hint: ''
+          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
         - name: ROLE_NAME
           example: my-app-role
           required: true
           type: string
           hint: Existing execution role; paste the required service permissions into its bound policy.
-          pattern: "[A-Za-z0-9+=,.@_-]{1,64}"
+          pattern: '[A-Za-z0-9+=,.@_-]{1,64}'
         - name: TAG_KEY
           example: Project
           required: true
@@ -866,10 +2488,71 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
+          StatesStartAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Start this state machine, including its versions and aliases.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action: states:StartExecution
+                    Resource:
+                      - Ref: StateMachine
+                      - Fn::Sub: ${StateMachine}:*
+          StatesReadAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Describe this workflow and read its execution history.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - states:DescribeStateMachine
+                      - states:ListExecutions
+                    Resource:
+                      - Ref: StateMachine
+                      - Fn::Sub: ${StateMachine}:*
+                  - Effect: Allow
+                    Action:
+                      - states:DescribeExecution
+                      - states:GetExecutionHistory
+                    Resource:
+                      Fn::Sub: arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${Name}:*
+          StatesStopAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Stop executions belonging to this workflow.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action: states:StopExecution
+                    Resource:
+                      Fn::Sub: arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${Name}:*
         Outputs:
           StateMachineArn:
             Value:
               Ref: StateMachine
+          StatesStartAccessArn:
+            Description: 'Optional policy: Start this state machine, including its versions and aliases. Attach to a role, user or group when needed.'
+            Value:
+              Ref: StatesStartAccess
+          StatesReadAccessArn:
+            Description: 'Optional policy: Describe this workflow and read its execution history. Attach to a role, user or group when needed.'
+            Value:
+              Ref: StatesReadAccess
+          StatesStopAccessArn:
+            Description: 'Optional policy: Stop executions belonging to this workflow. Attach to a role, user or group when needed.'
+            Value:
+              Ref: StatesStopAccess
     - id: service-athena
       title: Athena
       env:
@@ -877,8 +2560,8 @@
           example: my-workgroup
           required: true
           type: string
-          hint: ""
-          pattern: "[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"
+          hint: ''
+          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
         - name: TAG_KEY
           example: Project
           required: true
@@ -915,7 +2598,30 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
-        Outputs: {}
+          AthenaQueryAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Run and inspect queries in this workgroup. Add source S3/catalog permissions separately.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - athena:StartQueryExecution
+                      - athena:StopQueryExecution
+                      - athena:GetQueryExecution
+                      - athena:GetQueryResults
+                      - athena:ListQueryExecutions
+                      - athena:GetWorkGroup
+                    Resource:
+                      Fn::Sub: arn:${AWS::Partition}:athena:${AWS::Region}:${AWS::AccountId}:workgroup/${Workgroup}
+        Outputs:
+          AthenaQueryAccessArn:
+            Description: 'Optional policy: Run and inspect queries in this workgroup. Add source S3/catalog permissions separately. Attach to a role, user or group when needed.'
+            Value:
+              Ref: AthenaQueryAccess
     - id: service-kinesis
       title: Kinesis
       env:
@@ -923,8 +2629,8 @@
           example: my-stream
           required: true
           type: string
-          hint: ""
-          pattern: "[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"
+          hint: ''
+          pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
         - name: TAG_KEY
           example: Project
           required: true
@@ -973,7 +2679,7 @@
                 Version: 2012-10-17
                 Statement:
                   - Effect: Deny
-                    Principal: "*"
+                    Principal: '*'
                     Action: kinesis:*
                     Resource:
                       Fn::GetAtt:
@@ -981,14 +2687,60 @@
                         - Arn
                     Condition:
                       Bool:
-                        aws:SecureTransport: "false"
-                        aws:PrincipalIsAWSService: "false"
+                        aws:SecureTransport: 'false'
+                        aws:PrincipalIsAWSService: 'false'
+          KinesisPublishAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Put individual or batched records into this encrypted stream.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - kinesis:PutRecord
+                      - kinesis:PutRecords
+                      - kinesis:DescribeStreamSummary
+                    Resource:
+                      Fn::GetAtt:
+                        - Stream
+                        - Arn
+          KinesisReadAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Read records using shard iterators from this stream.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - kinesis:GetRecords
+                      - kinesis:GetShardIterator
+                      - kinesis:DescribeStream
+                      - kinesis:DescribeStreamSummary
+                      - kinesis:ListShards
+                    Resource:
+                      Fn::GetAtt:
+                        - Stream
+                        - Arn
         Outputs:
           StreamArn:
             Value:
               Fn::GetAtt:
                 - Stream
                 - Arn
+          KinesisPublishAccessArn:
+            Description: 'Optional policy: Put individual or batched records into this encrypted stream. Attach to a role, user or group when needed.'
+            Value:
+              Ref: KinesisPublishAccess
+          KinesisReadAccessArn:
+            Description: 'Optional policy: Read records using shard iterators from this stream. Attach to a role, user or group when needed.'
+            Value:
+              Ref: KinesisReadAccess
     - id: service-security
       title: GuardDuty and IAM Access Analyzer
       env:
@@ -996,7 +2748,7 @@
           example: account-access
           required: true
           type: string
-          pattern: "[A-Za-z][A-Za-z0-9_-]{0,254}"
+          pattern: '[A-Za-z][A-Za-z0-9_-]{0,254}'
           hint: External-access analyzer name. Reuses an existing account external-access analyzer in REGION, even if named differently.
         - name: TAG_KEY
           example: Project
@@ -1052,3 +2804,1198 @@
                 - Analyzer
                 - Arn
       cli: security
+    - id: service-iot-audit
+      title: IoT Device Defender Audit
+      env:
+        - name: NAME
+          example: my-iot-audit
+          required: true
+          hint: Enables all audit checks, a daily schedule, IoT logging and an encrypted SNS topic. Subscribe notifications later.
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: iot-audit
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Description: Daily Device Defender audit with every supported check, IoT logging and an encrypted SNS topic; no notification subscriber required. One audit/logging configuration per account and region; import existing resources before using CloudFormation.
+        Parameters:
+          Name:
+            Type: String
+            AllowedPattern: '[a-z][a-z0-9-]{2,23}'
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Alerts:
+            Type: AWS::SNS::Topic
+            Properties:
+              TopicName:
+                Fn::Sub: ${Name}-audit
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+              KmsMasterKeyId: alias/aws/sns
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+          AlertsTLS:
+            Type: AWS::SNS::TopicPolicy
+            Properties:
+              Topics:
+                - Ref: Alerts
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Deny
+                    Principal: '*'
+                    Action: sns:*
+                    Resource:
+                      Ref: Alerts
+                    Condition:
+                      Bool:
+                        aws:SecureTransport: 'false'
+                        aws:PrincipalIsAWSService: 'false'
+          AuditRole:
+            Type: AWS::IAM::Role
+            Properties:
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: iot.amazonaws.com
+                    Action: sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Ref: AWS::AccountId
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: 'arn:${AWS::Partition}:iot:${AWS::Region}:${AWS::AccountId}::'
+              ManagedPolicyArns:
+                - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSIoTDeviceDefenderAudit
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          NotificationRole:
+            Type: AWS::IAM::Role
+            Properties:
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: iot.amazonaws.com
+                    Action: sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Ref: AWS::AccountId
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: 'arn:${AWS::Partition}:iot:${AWS::Region}:${AWS::AccountId}::'
+              Policies:
+                - PolicyName: ServiceAccess
+                  PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Effect: Allow
+                        Action: sns:Publish
+                        Resource:
+                          Ref: Alerts
+                      - Effect: Allow
+                        Action:
+                          - kms:GenerateDataKey
+                          - kms:Decrypt
+                        Resource:
+                          Fn::Sub: arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/*
+                        Condition:
+                          StringEquals:
+                            kms:ViaService:
+                              Fn::Sub: sns.${AWS::Region}.${AWS::URLSuffix}
+                          ForAnyValue:StringEquals:
+                            kms:ResourceAliases: alias/aws/sns
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Logs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName: AWSIotLogsV2
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          LoggingRole:
+            Type: AWS::IAM::Role
+            Properties:
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: iot.amazonaws.com
+                    Action: sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Ref: AWS::AccountId
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:iot:${AWS::Region}:${AWS::AccountId}:*
+              Policies:
+                - PolicyName: ServiceAccess
+                  PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Effect: Allow
+                        Action:
+                          - logs:CreateLogStream
+                          - logs:PutLogEvents
+                        Resource:
+                          Fn::GetAtt:
+                            - Logs
+                            - Arn
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Logging:
+            Type: AWS::IoT::Logging
+            Properties:
+              AccountId:
+                Ref: AWS::AccountId
+              DefaultLogLevel: INFO
+              RoleArn:
+                Fn::GetAtt:
+                  - LoggingRole
+                  - Arn
+          Audit:
+            Type: AWS::IoT::AccountAuditConfiguration
+            Properties:
+              AccountId:
+                Ref: AWS::AccountId
+              RoleArn:
+                Fn::GetAtt:
+                  - AuditRole
+                  - Arn
+              AuditCheckConfigurations:
+                AuthenticatedCognitoRoleOverlyPermissiveCheck:
+                  Enabled: true
+                CaCertificateExpiringCheck:
+                  Enabled: true
+                CaCertificateKeyQualityCheck:
+                  Enabled: true
+                ConflictingClientIdsCheck:
+                  Enabled: true
+                DeviceCertificateAgeCheck:
+                  Enabled: true
+                DeviceCertificateExpiringCheck:
+                  Enabled: true
+                DeviceCertificateKeyQualityCheck:
+                  Enabled: true
+                DeviceCertificateSharedCheck:
+                  Enabled: true
+                IntermediateCaRevokedForActiveDeviceCertificatesCheck:
+                  Enabled: true
+                IoTPolicyPotentialMisConfigurationCheck:
+                  Enabled: true
+                IotPolicyOverlyPermissiveCheck:
+                  Enabled: true
+                IotRoleAliasAllowsAccessToUnusedServicesCheck:
+                  Enabled: true
+                IotRoleAliasOverlyPermissiveCheck:
+                  Enabled: true
+                LoggingDisabledCheck:
+                  Enabled: true
+                RevokedCaCertificateStillActiveCheck:
+                  Enabled: true
+                RevokedDeviceCertificateStillActiveCheck:
+                  Enabled: true
+                UnauthenticatedCognitoRoleOverlyPermissiveCheck:
+                  Enabled: true
+              AuditNotificationTargetConfigurations:
+                Sns:
+                  Enabled: true
+                  TargetArn:
+                    Ref: Alerts
+                  RoleArn:
+                    Fn::GetAtt:
+                      - NotificationRole
+                      - Arn
+          DailyAudit:
+            Type: AWS::IoT::ScheduledAudit
+            DependsOn: Audit
+            Properties:
+              ScheduledAuditName:
+                Ref: Name
+              Frequency: DAILY
+              TargetCheckNames:
+                - AUTHENTICATED_COGNITO_ROLE_OVERLY_PERMISSIVE_CHECK
+                - CA_CERTIFICATE_EXPIRING_CHECK
+                - CA_CERTIFICATE_KEY_QUALITY_CHECK
+                - CONFLICTING_CLIENT_IDS_CHECK
+                - DEVICE_CERTIFICATE_AGE_CHECK
+                - DEVICE_CERTIFICATE_EXPIRING_CHECK
+                - DEVICE_CERTIFICATE_KEY_QUALITY_CHECK
+                - DEVICE_CERTIFICATE_SHARED_CHECK
+                - INTERMEDIATE_CA_REVOKED_FOR_ACTIVE_DEVICE_CERTIFICATES_CHECK
+                - IOT_POLICY_POTENTIAL_MISCONFIGURATION_CHECK
+                - IOT_POLICY_OVERLY_PERMISSIVE_CHECK
+                - IOT_ROLE_ALIAS_ALLOWS_ACCESS_TO_UNUSED_SERVICES_CHECK
+                - IOT_ROLE_ALIAS_OVERLY_PERMISSIVE_CHECK
+                - LOGGING_DISABLED_CHECK
+                - REVOKED_CA_CERTIFICATE_STILL_ACTIVE_CHECK
+                - REVOKED_DEVICE_CERTIFICATE_STILL_ACTIVE_CHECK
+                - UNAUTHENTICATED_COGNITO_ROLE_OVERLY_PERMISSIVE_CHECK
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+        Outputs:
+          Notifications:
+            Value:
+              Ref: Alerts
+            Description: Optional notification topic; add subscribers when needed.
+    - id: service-transfer
+      title: Transfer Family SFTP
+      env:
+        - name: NAME
+          example: my-transfer
+          required: true
+          hint: Creates public SFTP, encrypted/versioned storage, logging and an uploads/ access role. Add SSH-key users later; a VPC can be configured after stopping the server.
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: transfer
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Description: Public SFTP baseline with encrypted/versioned S3 storage, structured logging and a role scoped to uploads/. Add service-managed SSH-key users with this role and a logical home at /bucket/uploads. No VPC required; stop the server before changing its endpoint type. Server has an hourly charge until deleted.
+        Parameters:
+          Name:
+            Type: String
+            AllowedPattern: '[a-z][a-z0-9-]{2,23}'
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Bucket:
+            Type: AWS::S3::Bucket
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              BucketName:
+                Fn::Sub: ${Name}-${AWS::AccountId}-${AWS::Region}
+              BucketEncryption:
+                ServerSideEncryptionConfiguration:
+                  - ServerSideEncryptionByDefault:
+                      SSEAlgorithm: AES256
+              PublicAccessBlockConfiguration:
+                BlockPublicAcls: true
+                BlockPublicPolicy: true
+                IgnorePublicAcls: true
+                RestrictPublicBuckets: true
+              OwnershipControls:
+                Rules:
+                  - ObjectOwnership: BucketOwnerEnforced
+              VersioningConfiguration:
+                Status: Enabled
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          TLS:
+            Type: AWS::S3::BucketPolicy
+            Properties:
+              Bucket:
+                Ref: Bucket
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Deny
+                    Principal: '*'
+                    Action: s3:*
+                    Resource:
+                      - Fn::GetAtt:
+                          - Bucket
+                          - Arn
+                      - Fn::Sub: ${Bucket.Arn}/*
+                    Condition:
+                      Bool:
+                        aws:SecureTransport: 'false'
+                        aws:PrincipalIsAWSService: 'false'
+          Logs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/transfer/${Name}
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Server:
+            Type: AWS::Transfer::Server
+            Properties:
+              Domain: S3
+              EndpointType: PUBLIC
+              IdentityProviderType: SERVICE_MANAGED
+              Protocols:
+                - SFTP
+              SecurityPolicyName: TransferSecurityPolicy-2024-01
+              StructuredLogDestinations:
+                - Fn::GetAtt:
+                    - Logs
+                    - Arn
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          UserRole:
+            Type: AWS::IAM::Role
+            Properties:
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: transfer.amazonaws.com
+                    Action: sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Ref: AWS::AccountId
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:transfer:${AWS::Region}:${AWS::AccountId}:user/${Server.ServerId}/*
+              Policies:
+                - PolicyName: ServiceAccess
+                  PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Effect: Allow
+                        Action: s3:ListBucket
+                        Resource:
+                          Fn::GetAtt:
+                            - Bucket
+                            - Arn
+                        Condition:
+                          StringLike:
+                            s3:prefix:
+                              - uploads
+                              - uploads/*
+                      - Effect: Allow
+                        Action: s3:GetBucketLocation
+                        Resource:
+                          Fn::GetAtt:
+                            - Bucket
+                            - Arn
+                      - Effect: Allow
+                        Action:
+                          - s3:GetObject
+                          - s3:PutObject
+                          - s3:DeleteObject
+                          - s3:GetObjectVersion
+                        Resource:
+                          Fn::Sub: ${Bucket.Arn}/uploads/*
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          TransferReadAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Read the Transfer bucket uploads/ prefix.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - s3:GetBucketLocation
+                    Resource:
+                      Fn::GetAtt:
+                        - Bucket
+                        - Arn
+                  - Effect: Allow
+                    Action:
+                      - s3:ListBucket
+                      - s3:ListBucketVersions
+                    Resource:
+                      Fn::GetAtt:
+                        - Bucket
+                        - Arn
+                    Condition:
+                      StringLike:
+                        s3:prefix:
+                          - uploads
+                          - uploads/*
+                  - Effect: Allow
+                    Action:
+                      - s3:GetObject
+                      - s3:GetObjectVersion
+                    Resource:
+                      Fn::Sub: ${Bucket.Arn}/uploads/*
+          TransferWriteAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Upload objects under uploads/ and inspect multipart uploads in the Transfer bucket.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - s3:GetBucketLocation
+                      - s3:ListBucketMultipartUploads
+                    Resource:
+                      Fn::GetAtt:
+                        - Bucket
+                        - Arn
+                  - Effect: Allow
+                    Action:
+                      - s3:PutObject
+                      - s3:AbortMultipartUpload
+                      - s3:ListMultipartUploadParts
+                    Resource:
+                      Fn::Sub: ${Bucket.Arn}/uploads/*
+        Outputs:
+          ServerId:
+            Value:
+              Fn::GetAtt:
+                - Server
+                - ServerId
+          BucketName:
+            Value:
+              Ref: Bucket
+          UserRoleArn:
+            Description: Use this role for service-managed SSH-key users.
+            Value:
+              Fn::GetAtt:
+                - UserRole
+                - Arn
+          HomeDirectory:
+            Description: Use as the target of a logical home mapping with Entry /.
+            Value:
+              Fn::Sub: /${Bucket}/uploads
+          TransferReadAccessArn:
+            Description: 'Optional policy: Read the Transfer bucket uploads/ prefix. Attach to a role, user or group when needed.'
+            Value:
+              Ref: TransferReadAccess
+          TransferWriteAccessArn:
+            Description: 'Optional policy: Upload objects under uploads/ and inspect multipart uploads in the Transfer bucket. Attach to a role, user or group when needed.'
+            Value:
+              Ref: TransferWriteAccess
+    - id: service-firehose
+      title: Data Firehose
+      env:
+        - name: NAME
+          example: my-firehose
+          required: true
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: firehose
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Description: Encrypted DirectPut stream to a private versioned bucket, delivery logs and a freshness alarm. Attach an alarm action for notifications.
+        Parameters:
+          Name:
+            Type: String
+            AllowedPattern: '[a-z][a-z0-9-]{2,23}'
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Bucket:
+            Type: AWS::S3::Bucket
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              BucketName:
+                Fn::Sub: ${Name}-${AWS::AccountId}-${AWS::Region}
+              BucketEncryption:
+                ServerSideEncryptionConfiguration:
+                  - ServerSideEncryptionByDefault:
+                      SSEAlgorithm: AES256
+              PublicAccessBlockConfiguration:
+                BlockPublicAcls: true
+                BlockPublicPolicy: true
+                IgnorePublicAcls: true
+                RestrictPublicBuckets: true
+              OwnershipControls:
+                Rules:
+                  - ObjectOwnership: BucketOwnerEnforced
+              VersioningConfiguration:
+                Status: Enabled
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          TLS:
+            Type: AWS::S3::BucketPolicy
+            Properties:
+              Bucket:
+                Ref: Bucket
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Deny
+                    Principal: '*'
+                    Action: s3:*
+                    Resource:
+                      - Fn::GetAtt:
+                          - Bucket
+                          - Arn
+                      - Fn::Sub: ${Bucket.Arn}/*
+                    Condition:
+                      Bool:
+                        aws:SecureTransport: 'false'
+                        aws:PrincipalIsAWSService: 'false'
+          Logs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/kinesisfirehose/${Name}
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          LogStream:
+            Type: AWS::Logs::LogStream
+            Properties:
+              LogGroupName:
+                Ref: Logs
+              LogStreamName: S3Delivery
+          DeliveryRole:
+            Type: AWS::IAM::Role
+            Properties:
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: firehose.amazonaws.com
+                    Action: sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        sts:ExternalId:
+                          Ref: AWS::AccountId
+              Policies:
+                - PolicyName: ServiceAccess
+                  PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Effect: Allow
+                        Action:
+                          - s3:GetBucketLocation
+                          - s3:ListBucket
+                          - s3:ListBucketMultipartUploads
+                        Resource:
+                          Fn::GetAtt:
+                            - Bucket
+                            - Arn
+                      - Effect: Allow
+                        Action:
+                          - s3:GetObject
+                          - s3:PutObject
+                          - s3:AbortMultipartUpload
+                        Resource:
+                          Fn::Sub: ${Bucket.Arn}/*
+                      - Effect: Allow
+                        Action: logs:PutLogEvents
+                        Resource:
+                          Fn::GetAtt:
+                            - Logs
+                            - Arn
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Stream:
+            Type: AWS::KinesisFirehose::DeliveryStream
+            DependsOn:
+              - TLS
+            Properties:
+              DeliveryStreamName:
+                Ref: Name
+              DeliveryStreamType: DirectPut
+              DeliveryStreamEncryptionConfigurationInput:
+                KeyType: AWS_OWNED_CMK
+              ExtendedS3DestinationConfiguration:
+                BucketARN:
+                  Fn::GetAtt:
+                    - Bucket
+                    - Arn
+                RoleARN:
+                  Fn::GetAtt:
+                    - DeliveryRole
+                    - Arn
+                Prefix: data/
+                ErrorOutputPrefix: errors/!{firehose:error-output-type}/
+                BufferingHints:
+                  IntervalInSeconds: 60
+                  SizeInMBs: 1
+                CompressionFormat: GZIP
+                CloudWatchLoggingOptions:
+                  Enabled: true
+                  LogGroupName:
+                    Ref: Logs
+                  LogStreamName:
+                    Ref: LogStream
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          DeliveryAlarm:
+            Type: AWS::CloudWatch::Alarm
+            Properties:
+              AlarmDescription: Firehose S3 delivery is falling behind
+              Namespace: AWS/Firehose
+              MetricName: DeliveryToS3.DataFreshness
+              Dimensions:
+                - Name: DeliveryStreamName
+                  Value:
+                    Ref: Name
+              Statistic: Maximum
+              Period: 300
+              EvaluationPeriods: 2
+              Threshold: 900
+              ComparisonOperator: GreaterThanThreshold
+              TreatMissingData: notBreaching
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          FirehosePublishAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Put records and batches into this delivery stream.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - firehose:PutRecord
+                      - firehose:PutRecordBatch
+                      - firehose:DescribeDeliveryStream
+                    Resource:
+                      Fn::GetAtt:
+                        - Stream
+                        - Arn
+          FirehoseReadAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Read delivered data in the data/ prefix of the destination bucket.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - s3:GetBucketLocation
+                    Resource:
+                      Fn::GetAtt:
+                        - Bucket
+                        - Arn
+                  - Effect: Allow
+                    Action:
+                      - s3:ListBucket
+                      - s3:ListBucketVersions
+                    Resource:
+                      Fn::GetAtt:
+                        - Bucket
+                        - Arn
+                    Condition:
+                      StringLike:
+                        s3:prefix:
+                          - data
+                          - data/*
+                  - Effect: Allow
+                    Action:
+                      - s3:GetObject
+                      - s3:GetObjectVersion
+                    Resource:
+                      Fn::Sub: ${Bucket.Arn}/data/*
+        Outputs:
+          StreamArn:
+            Value:
+              Fn::GetAtt:
+                - Stream
+                - Arn
+          BucketName:
+            Value:
+              Ref: Bucket
+          FirehosePublishAccessArn:
+            Description: 'Optional policy: Put records and batches into this delivery stream. Attach to a role, user or group when needed.'
+            Value:
+              Ref: FirehosePublishAccess
+          FirehoseReadAccessArn:
+            Description: 'Optional policy: Read delivered data in the data/ prefix of the destination bucket. Attach to a role, user or group when needed.'
+            Value:
+              Ref: FirehoseReadAccess
+    - id: service-glue-security
+      title: Glue Security Defaults
+      env:
+        - name: NAME
+          example: my-glue-security
+          required: true
+          hint: Creates the key, role and encryption configuration; enables catalog encryption now. Select the role and security configuration when creating jobs/crawlers, then grant access to your data buckets.
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: glue-security
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Description: Creates a rotating KMS key, Glue execution role and security configuration for encrypted S3 job output, CloudWatch logs and job bookmarks. Enables catalog metadata/connection-password encryption in this account/region immediately. Select this role/configuration for jobs and crawlers; grant workload S3 access separately. Other catalog readers need permission to decrypt with this key.
+        Parameters:
+          Name:
+            Type: String
+            AllowedPattern: '[a-z][a-z0-9-]{2,23}'
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+        Resources:
+          Key:
+            Type: AWS::KMS::Key
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description:
+                Fn::Sub: ${Name} Glue encryption
+              KeySpec: SYMMETRIC_DEFAULT
+              KeyUsage: ENCRYPT_DECRYPT
+              EnableKeyRotation: true
+              PendingWindowInDays: 30
+              KeyPolicy:
+                Version: 2012-10-17
+                Statement:
+                  - Sid: AccountKeyAdministration
+                    Effect: Allow
+                    Principal:
+                      AWS:
+                        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+                    Action: kms:*
+                    Resource: '*'
+                  - Sid: GlueCloudWatchLogs
+                    Effect: Allow
+                    Principal:
+                      Service:
+                        Fn::Sub: logs.${AWS::Region}.${AWS::URLSuffix}
+                    Action:
+                      - kms:Encrypt
+                      - kms:Decrypt
+                      - kms:ReEncrypt*
+                      - kms:GenerateDataKey*
+                      - kms:DescribeKey
+                    Resource: '*'
+                    Condition:
+                      ArnLike:
+                        kms:EncryptionContext:aws:logs:arn:
+                          Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws-glue/*
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          KeyAlias:
+            Type: AWS::KMS::Alias
+            Properties:
+              AliasName:
+                Fn::Sub: alias/${Name}
+              TargetKeyId:
+                Ref: Key
+          GlueRole:
+            Type: AWS::IAM::Role
+            Properties:
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: glue.amazonaws.com
+                    Action: sts:AssumeRole
+              ManagedPolicyArns:
+                - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSGlueServiceRole
+              Policies:
+                - PolicyName: EncryptionAccess
+                  PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Effect: Allow
+                        Action:
+                          - kms:Encrypt
+                          - kms:Decrypt
+                          - kms:ReEncrypt*
+                          - kms:GenerateDataKey*
+                          - kms:DescribeKey
+                        Resource:
+                          Fn::GetAtt:
+                            - Key
+                            - Arn
+                      - Effect: Allow
+                        Action: logs:AssociateKmsKey
+                        Resource:
+                          Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws-glue/*
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Security:
+            Type: AWS::Glue::SecurityConfiguration
+            Properties:
+              Name:
+                Ref: Name
+              EncryptionConfiguration:
+                S3Encryptions:
+                  - S3EncryptionMode: SSE-KMS
+                    KmsKeyArn:
+                      Fn::GetAtt:
+                        - Key
+                        - Arn
+                CloudWatchEncryption:
+                  CloudWatchEncryptionMode: SSE-KMS
+                  KmsKeyArn:
+                    Fn::GetAtt:
+                      - Key
+                      - Arn
+                JobBookmarksEncryption:
+                  JobBookmarksEncryptionMode: CSE-KMS
+                  KmsKeyArn:
+                    Fn::GetAtt:
+                      - Key
+                      - Arn
+          Catalog:
+            Type: AWS::Glue::DataCatalogEncryptionSettings
+            Properties:
+              CatalogId:
+                Ref: AWS::AccountId
+              DataCatalogEncryptionSettings:
+                EncryptionAtRest:
+                  CatalogEncryptionMode: SSE-KMS
+                  SseAwsKmsKeyId:
+                    Fn::GetAtt:
+                      - Key
+                      - Arn
+                ConnectionPasswordEncryption:
+                  ReturnConnectionPasswordEncrypted: true
+                  KmsKeyId:
+                    Fn::GetAtt:
+                      - Key
+                      - Arn
+          GlueDecryptAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Decrypt data protected by the created Glue KMS key.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - kms:Decrypt
+                      - kms:DescribeKey
+                    Resource:
+                      Fn::GetAtt:
+                        - Key
+                        - Arn
+          GlueEncryptAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Encrypt and decrypt data with the created Glue KMS key.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - kms:Encrypt
+                      - kms:Decrypt
+                      - kms:GenerateDataKey
+                      - kms:ReEncryptFrom
+                      - kms:ReEncryptTo
+                      - kms:DescribeKey
+                    Resource:
+                      Fn::GetAtt:
+                        - Key
+                        - Arn
+        Outputs:
+          SecurityConfiguration:
+            Value:
+              Ref: Security
+          KeyArn:
+            Value:
+              Fn::GetAtt:
+                - Key
+                - Arn
+          RoleArn:
+            Value:
+              Fn::GetAtt:
+                - GlueRole
+                - Arn
+          GlueDecryptAccessArn:
+            Description: 'Optional policy: Decrypt data protected by the created Glue KMS key. Attach to a role, user or group when needed.'
+            Value:
+              Ref: GlueDecryptAccess
+          GlueEncryptAccessArn:
+            Description: 'Optional policy: Encrypt and decrypt data with the created Glue KMS key. Attach to a role, user or group when needed.'
+            Value:
+              Ref: GlueEncryptAccess
+    - id: service-scheduler
+      title: EventBridge Scheduler
+      env:
+        - name: NAME
+          example: my-scheduler
+          required: true
+        - name: TARGET_ARN
+          example: arn:aws:lambda:eu-central-1:111122223333:function:worker:live
+          required: true
+          hint: Existing Lambda alias/version in this region. Configure the Lambda async failure destination separately.
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+      templateName: scheduler
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Description: Hourly Lambda invocation with scoped role, retry limit, encrypted DLQ and alarm. DLQ catches scheduling/delivery failures, not function execution errors.
+        Parameters:
+          Name:
+            Type: String
+            AllowedPattern: '[a-z][a-z0-9-]{2,23}'
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+          TargetArn:
+            Type: String
+            Description: Existing Lambda alias/version in this region. Configure the Lambda async failure destination separately.
+        Resources:
+          DLQ:
+            Type: AWS::SQS::Queue
+            Properties:
+              QueueName:
+                Fn::Sub: ${Name}-dlq
+              SqsManagedSseEnabled: true
+              MessageRetentionPeriod: 1209600
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Group:
+            Type: AWS::Scheduler::ScheduleGroup
+            Properties:
+              Name:
+                Ref: Name
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          ExecutionRole:
+            Type: AWS::IAM::Role
+            Properties:
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: scheduler.amazonaws.com
+                    Action: sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Ref: AWS::AccountId
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule-group/${Name}
+              Policies:
+                - PolicyName: ServiceAccess
+                  PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Effect: Allow
+                        Action: lambda:InvokeFunction
+                        Resource:
+                          Ref: TargetArn
+                      - Effect: Allow
+                        Action: sqs:SendMessage
+                        Resource:
+                          Fn::GetAtt:
+                            - DLQ
+                            - Arn
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          Schedule:
+            Type: AWS::Scheduler::Schedule
+            Properties:
+              Name:
+                Ref: Name
+              GroupName:
+                Ref: Group
+              ScheduleExpression: rate(1 hour)
+              FlexibleTimeWindow:
+                Mode: OFF
+              State: ENABLED
+              Target:
+                Arn:
+                  Ref: TargetArn
+                RoleArn:
+                  Fn::GetAtt:
+                    - ExecutionRole
+                    - Arn
+                Input: '{}'
+                DeadLetterConfig:
+                  Arn:
+                    Fn::GetAtt:
+                      - DLQ
+                      - Arn
+                RetryPolicy:
+                  MaximumEventAgeInSeconds: 3600
+                  MaximumRetryAttempts: 3
+          DLQAlarm:
+            Type: AWS::CloudWatch::Alarm
+            Properties:
+              AlarmDescription: Scheduler exhausted delivery retries
+              Namespace: AWS/SQS
+              MetricName: ApproximateNumberOfMessagesVisible
+              Dimensions:
+                - Name: QueueName
+                  Value:
+                    Fn::Sub: ${Name}-dlq
+              Statistic: Maximum
+              Period: 300
+              EvaluationPeriods: 1
+              Threshold: 0
+              ComparisonOperator: GreaterThanThreshold
+              TreatMissingData: notBreaching
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          SchedulerReadAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Read this schedule and NAME-prefixed schedules in its group.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action: scheduler:GetSchedule
+                    Resource:
+                      - Fn::Sub: arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${Group}/${Name}
+                      - Fn::Sub: arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${Group}/${Name}-*
+                  - Effect: Allow
+                    Action: scheduler:GetScheduleGroup
+                    Resource:
+                      Fn::Sub: arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule-group/${Group}
+          SchedulerManageAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Manage NAME-prefixed schedules in this group using the created execution role.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - scheduler:CreateSchedule
+                      - scheduler:UpdateSchedule
+                      - scheduler:DeleteSchedule
+                      - scheduler:GetSchedule
+                    Resource:
+                      - Fn::Sub: arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${Group}/${Name}
+                      - Fn::Sub: arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${Group}/${Name}-*
+                  - Effect: Allow
+                    Action: iam:PassRole
+                    Resource:
+                      Fn::GetAtt:
+                        - ExecutionRole
+                        - Arn
+                    Condition:
+                      StringEquals:
+                        iam:PassedToService: scheduler.amazonaws.com
+        Outputs:
+          DeadLetterQueue:
+            Value:
+              Ref: DLQ
+          SchedulerReadAccessArn:
+            Description: 'Optional policy: Read this schedule and NAME-prefixed schedules in its group. Attach to a role, user or group when needed.'
+            Value:
+              Ref: SchedulerReadAccess
+          SchedulerManageAccessArn:
+            Description: 'Optional policy: Manage NAME-prefixed schedules in this group using the created execution role. Attach to a role, user or group when needed.'
+            Value:
+              Ref: SchedulerManageAccess

@@ -1,0 +1,33 @@
+{
+  "QueryLanguage": "JSONata",
+  "StartAt": "Init",
+  "States": {
+    "Init": {
+      "Type": "Pass",
+      "Assign": {
+        "count": 1
+      },
+      "Next": "Increment"
+    },
+    "Increment": {
+      "Type": "Pass",
+      "Assign": {
+        "count": "{% $count + 1 %}",
+        "previous": "{% $count %}"
+      },
+      "Output": {
+        "seen": "{% $count %}"
+      },
+      "Next": "Read"
+    },
+    "Read": {
+      "Type": "Pass",
+      "Output": {
+        "count": "{% $count %}",
+        "previous": "{% $previous %}",
+        "seen": "{% $states.input.seen %}"
+      },
+      "End": true
+    }
+  }
+}

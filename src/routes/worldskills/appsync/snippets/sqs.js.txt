@@ -1,0 +1,30 @@
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+  if (util.authType() !== 'User Pool Authorization' || !ctx.identity?.sub) {
+    util.unauthorized();
+  }
+  const owner = ctx.identity.sub;
+  return {
+    method: 'POST',
+    resourcePath: '/',
+    params: {
+      headers: {
+        'Content-Type': 'application/x-amz-json-1.0',
+        'X-Amz-Target': 'AmazonSQS.SendMessage',
+      },
+      body: JSON.stringify({
+        QueueUrl: 'https://sqs.eu-central-1.amazonaws.com/123456789012/my-queue',
+        MessageBody: JSON.stringify({ owner, input: ctx.args.input }),
+      }),
+    },
+  };
+}
+
+export function response(ctx) {
+  if (ctx.error) util.error('SQS request failed', ctx.error.type);
+  if (ctx.result.statusCode !== 200) util.error('SQS request failed', 'UpstreamError');
+  const body = JSON.parse(ctx.result.body);
+  if (!body.MessageId) util.error('Missing message ID', 'UpstreamError');
+  return body.MessageId;
+}

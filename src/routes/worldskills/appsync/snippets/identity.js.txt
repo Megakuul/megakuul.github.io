@@ -1,0 +1,20 @@
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+  if (util.authType() !== 'User Pool Authorization' || !ctx.identity?.sub) {
+    util.unauthorized();
+  }
+  const owner = ctx.identity.sub;
+  return {
+    payload: {
+      sub: owner,
+      username: ctx.identity.username,
+      groups: ctx.identity.groups ?? [],
+      issuer: ctx.identity.issuer,
+    },
+  };
+}
+
+export function response(ctx) {
+  return JSON.stringify(ctx.result);
+}

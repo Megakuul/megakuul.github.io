@@ -1,0 +1,20 @@
+import { util } from '@aws-appsync/utils';
+import { sql, createPgStatement, toJsonObject } from '@aws-appsync/utils/rds';
+
+export function request(ctx) {
+  if (util.authType() !== 'User Pool Authorization' || !ctx.identity?.sub) {
+    util.unauthorized();
+  }
+  const owner = ctx.identity.sub;
+  return createPgStatement(sql`
+    SELECT id, owner, title, version FROM items
+    WHERE owner = ${owner} AND id = ${ctx.args.id}
+  `);
+}
+
+export function response(ctx) {
+  if (ctx.error) util.error('Database request failed', ctx.error.type);
+  const rows = toJsonObject(ctx.result);
+  if (!rows) util.error('Invalid database response', 'UpstreamError');
+  return rows[0][0] ?? null;
+}

@@ -1,0 +1,16 @@
+import { util } from '@aws-appsync/utils';
+import { runtime } from '@aws-appsync/utils';
+
+export function request(ctx) {
+  if (util.authType() !== 'User Pool Authorization' || !ctx.identity?.sub) {
+    util.unauthorized();
+  }
+  const owner = ctx.identity.sub;
+  if (!ctx.args.query.trim()) runtime.earlyReturn([]);
+  return { payload: [{ id: 'example', owner, title: ctx.args.query, version: 1 }] };
+}
+
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return ctx.result;
+}

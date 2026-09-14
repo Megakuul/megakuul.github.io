@@ -1,0 +1,44 @@
+type Item {
+  id: ID!
+  owner: ID!
+  title: String!
+  version: Int!
+}
+
+type ItemPage {
+  items: [Item!]!
+  nextToken: String
+}
+
+type ItemView {
+  item: Item!
+  label: String!
+}
+
+type Query {
+  denied: String
+  identity: AWSJSON
+  admin: String
+  getItem(id: ID!): Item
+  listItems(limit: Int, nextToken: String): ItemPage!
+  pipelineItem(id: ID!): ItemView
+  preview(query: String!): [Item!]!
+  rdsItem(id: ID!): Item
+  searchItems(query: String!): [Item!]!
+}
+
+type Mutation {
+  createItem(title: String!): Item
+  updateItem(id: ID!, title: String!, version: Int!): Item
+  deleteItem(id: ID!, version: Int!): Item
+  invoke(input: AWSJSON!): AWSJSON
+  postHttp(input: AWSJSON!): AWSJSON
+  putRdsItem(id: ID!, title: String!): Item
+  publish(input: AWSJSON!): ID
+  enqueue(input: AWSJSON!): ID
+}
+
+schema {
+  query: Query
+  mutation: Mutation
+}

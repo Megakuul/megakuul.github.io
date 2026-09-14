@@ -1,0 +1,40 @@
+{
+  "QueryLanguage": "JSONPath",
+  "StartAt": "Check",
+  "States": {
+    "Check": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "And": [
+            {
+              "Variable": "$.priority",
+              "IsPresent": true
+            },
+            {
+              "Not": {
+                "Variable": "$.priority",
+                "IsNull": true
+              }
+            }
+          ],
+          "Next": "Read"
+        }
+      ],
+      "Default": "SetDefault"
+    },
+    "SetDefault": {
+      "Type": "Pass",
+      "Result": "normal",
+      "ResultPath": "$.priority",
+      "Next": "Read"
+    },
+    "Read": {
+      "Type": "Pass",
+      "Parameters": {
+        "priority.$": "$.priority"
+      },
+      "End": true
+    }
+  }
+}

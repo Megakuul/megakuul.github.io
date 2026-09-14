@@ -1,6 +1,11 @@
 - id: setup
   title: Setup
   recipes:
+    - id: parameter-store-intelligent-tiering
+      title: Parameter Store · Intelligent-Tiering
+      command: |-
+        # Current account and Region; default when no tier is specified.
+        aws ssm update-service-setting --setting-id /ssm/parameter-store/default-parameter-tier --setting-value Intelligent-Tiering
     - id: security-groups-setup
       title: Security Groups
       env:

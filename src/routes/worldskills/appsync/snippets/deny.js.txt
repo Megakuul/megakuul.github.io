@@ -1,0 +1,9 @@
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+  util.unauthorized();
+}
+
+export function response(ctx) {
+  return null;
+}

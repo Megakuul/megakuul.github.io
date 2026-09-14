@@ -69,6 +69,13 @@ import { CloudWatchClient, PutMetricDataCommand } from '@aws-sdk/client-cloudwat
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { CognitoIdentityProviderClient, AdminGetUserCommand, AdminCreateUserCommand, AdminSetUserPasswordCommand } from '@aws-sdk/client-cognito-identity-provider';
 import { ApiGatewayManagementApiClient, PostToConnectionCommand } from '@aws-sdk/client-apigatewaymanagementapi';
+import { IoTClient, DescribeEndpointCommand, CreateJobCommand, DescribeJobCommand } from '@aws-sdk/client-iot';
+import { IoTDataPlaneClient, PublishCommand as IotPublishCommand, GetThingShadowCommand, UpdateThingShadowCommand } from '@aws-sdk/client-iot-data-plane';
+import { TransferClient, StartFileTransferCommand, ListFileTransferResultsCommand, SendWorkflowStepStateCommand } from '@aws-sdk/client-transfer';
+import { FirehoseClient, PutRecordCommand as FirehosePutRecordCommand } from '@aws-sdk/client-firehose';
+import { GlueClient, StartJobRunCommand, GetJobRunCommand, StartCrawlerCommand } from '@aws-sdk/client-glue';
+import { SchedulerClient, CreateScheduleCommand, DeleteScheduleCommand } from '@aws-sdk/client-scheduler';
+import { DataSyncClient, StartTaskExecutionCommand, DescribeTaskExecutionCommand } from '@aws-sdk/client-datasync';
 import { gunzipSync } from 'node:zlib';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, chmodSync, readFileSync } from 'node:fs';
@@ -96,7 +103,13 @@ const kms = new KMSClient({});
 const ses = new SESv2Client({});
 const cw = new CloudWatchClient({});
 const bedrock = new BedrockRuntimeClient({});
-const idp = new CognitoIdentityProviderClient({});`,
+const idp = new CognitoIdentityProviderClient({});
+const iot = new IoTClient({});
+const transfer = new TransferClient({});
+const firehose = new FirehoseClient({});
+const glue = new GlueClient({});
+const scheduler = new SchedulerClient({});
+const datasync = new DataSyncClient({});`,
       py: `import boto3, json, base64, gzip, os, shutil, subprocess, time
 from datetime import datetime, timezone
 from urllib.parse import unquote_plus
@@ -127,6 +140,12 @@ ses = boto3.client("sesv2")
 cw = boto3.client("cloudwatch")
 bedrock = boto3.client("bedrock-runtime")
 idp = boto3.client("cognito-idp")
+iot = boto3.client("iot")
+transfer = boto3.client("transfer")
+firehose = boto3.client("firehose")
+glue = boto3.client("glue")
+scheduler = boto3.client("scheduler")
+datasync = boto3.client("datasync")
 
 deserialize = TypeDeserializer().deserialize
 unmarshall = lambda img: {k: deserialize(v) for k, v in img.items()}`,
@@ -568,6 +587,74 @@ const incoming: Group = {
       py: `def handler(event, context):
     print(context.aws_request_id, context.function_name, context.function_version, context.get_remaining_time_in_millis())
     return {"echo": event, "at": datetime.now(timezone.utc).isoformat()}`,
+    },
+    {
+      id: 'in-iot',
+      title: 'IoT rule',
+      note: "Rule SQL: SELECT *, topic() AS topic FROM 'devices/+/telemetry'. Grant iot.amazonaws.com lambda:InvokeFunction with the rule ARN as SourceArn.",
+      js: `export const handler = async (event) => {
+  const { topic, temperature } = event;
+  console.log({ topic, temperature });
+};`,
+      py: `def handler(event, context):
+    print({"topic": event["topic"], "temperature": event["temperature"]})`,
+    },
+    {
+      id: 'in-firehose',
+      title: 'Firehose transformation',
+      note: 'Direct PUT / Kinesis source. Preserve every recordId; malformed records go to the processing-failed prefix.',
+      js: `export const handler = async (event) => ({
+  records: event.records.map((r) => {
+    try {
+      const item = JSON.parse(Buffer.from(r.data, 'base64').toString());
+      const data = Buffer.from(JSON.stringify(item) + String.fromCharCode(10)).toString('base64');
+      return { recordId: r.recordId, result: 'Ok', data };
+    } catch {
+      return { recordId: r.recordId, result: 'ProcessingFailed', data: r.data };
+    }
+  }),
+});`,
+      py: `def handler(event, context):
+    records = []
+    for r in event["records"]:
+        try:
+            item = json.loads(base64.b64decode(r["data"]))
+            data = base64.b64encode((json.dumps(item) + chr(10)).encode()).decode()
+            records.append({"recordId": r["recordId"], "result": "Ok", "data": data})
+        except (ValueError, UnicodeError):
+            records.append({"recordId": r["recordId"], "result": "ProcessingFailed", "data": r["data"]})
+    return {"records": records}`,
+    },
+    {
+      id: 'in-transfer-workflow',
+      title: 'Transfer workflow custom step',
+      note: 'S3-backed workflow: verify that the uploaded object exists, then send the required callback. Role needs s3:GetObject on the upload prefix and transfer:SendWorkflowStepState on the workflow.',
+      js: `export const handler = async (event) => {
+  const { workflowId, executionId } = event.serviceMetadata.executionDetails;
+  const { bucket, key } = event.fileLocation;
+  let status = 'SUCCESS';
+  try {
+    const object = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    object.Body.destroy();
+  } catch {
+    status = 'FAILURE';
+  }
+  await transfer.send(new SendWorkflowStepStateCommand({
+    WorkflowId: workflowId, ExecutionId: executionId, Token: event.token, Status: status,
+  }));
+};`,
+      py: `def handler(event, context):
+    execution = event["serviceMetadata"]["executionDetails"]
+    location = event["fileLocation"]
+    status = "SUCCESS"
+    try:
+        obj = s3.get_object(Bucket=location["bucket"], Key=location["key"])
+        obj["Body"].close()
+    except Exception:
+        status = "FAILURE"
+    transfer.send_workflow_step_state(
+        WorkflowId=execution["workflowId"], ExecutionId=execution["executionId"],
+        Token=event["token"], Status=status)`,
     },
   ],
 };
@@ -1939,6 +2026,142 @@ idp.admin_create_user(
 )
 
 idp.admin_set_user_password(UserPoolId=pool, Username="ann@x.ch", Password="S3cret-pw", Permanent=True)`,
+    },
+    {
+      id: 'svc-iot-publish',
+      title: 'IoT publish over HTTPS',
+      note: 'Resolve the account-specific iot:Data-ATS endpoint once outside the handler and reuse iotData for shadows. Role needs iot:DescribeEndpoint on * and iot:Publish on the exact topic ARN; no device certificate is needed for this IAM-signed call.',
+      js: `const endpoint = await iot.send(new DescribeEndpointCommand({ endpointType: 'iot:Data-ATS' }));
+const iotData = new IoTDataPlaneClient({ endpoint: 'https://' + endpoint.endpointAddress });
+await iotData.send(new IotPublishCommand({
+  topic: 'devices/sensor-1/telemetry', qos: 1,
+  payload: Buffer.from(JSON.stringify({ temperature: 23.5 })),
+}));`,
+      py: `endpoint = iot.describe_endpoint(endpointType="iot:Data-ATS")["endpointAddress"]
+iot_data = boto3.client("iot-data", endpoint_url="https://" + endpoint)
+iot_data.publish(topic="devices/sensor-1/telemetry", qos=1,
+                 payload=json.dumps({"temperature": 23.5}).encode())`,
+    },
+    {
+      id: 'svc-iot-shadow',
+      title: 'IoT named shadow',
+      note: 'Uses iotData / iot_data from the publish snippet. Role needs iot:UpdateThingShadow and iot:GetThingShadow on the thing ARN.',
+      js: `await iotData.send(new UpdateThingShadowCommand({
+  thingName: 'sensor-1', shadowName: 'config',
+  payload: Buffer.from(JSON.stringify({ state: { desired: { interval: 60 } } })),
+}));
+const shadow = await iotData.send(new GetThingShadowCommand({ thingName: 'sensor-1', shadowName: 'config' }));
+const state = JSON.parse(Buffer.from(shadow.payload).toString()).state;`,
+      py: `iot_data.update_thing_shadow(thingName="sensor-1", shadowName="config",
+    payload=json.dumps({"state": {"desired": {"interval": 60}}}).encode())
+shadow = iot_data.get_thing_shadow(thingName="sensor-1", shadowName="config")
+state = json.loads(shadow["payload"].read())["state"]`,
+    },
+    {
+      id: 'svc-iot-job',
+      title: 'IoT device job',
+      note: 'The target thing must exist and a device client must process the job document. Use a stable unique job ID per deployment; creating a job does not run its operation on the device.',
+      js: `await iot.send(new CreateJobCommand({
+  jobId: 'configure-sensor-001',
+  targets: ['arn:aws:iot:eu-central-1:111122223333:thing/sensor-1'],
+  targetSelection: 'SNAPSHOT',
+  document: JSON.stringify({ operation: 'set-interval', seconds: 60 }),
+  timeoutConfig: { inProgressTimeoutInMinutes: 5 },
+}));
+const job = await iot.send(new DescribeJobCommand({ jobId: 'configure-sensor-001' }));`,
+      py: `iot.create_job(jobId="configure-sensor-001",
+    targets=["arn:aws:iot:eu-central-1:111122223333:thing/sensor-1"],
+    targetSelection="SNAPSHOT", document=json.dumps({"operation": "set-interval", "seconds": 60}),
+    timeoutConfig={"inProgressTimeoutInMinutes": 5})
+job = iot.describe_job(jobId="configure-sensor-001")`,
+    },
+    {
+      id: 'svc-transfer-send',
+      title: 'Transfer SFTP connector',
+      note: 'Existing connector with a scoped S3 access role, Secrets Manager credentials and a verified remote host key. Paths are /bucket/key. Poll results in a later invocation; a TransferId only means accepted.',
+      js: `const sent = await transfer.send(new StartFileTransferCommand({
+  ConnectorId: 'c-0123456789abcdef0',
+  SendFilePaths: ['/my-bucket/out/report.csv'], RemoteDirectoryPath: '/incoming',
+}));
+const results = await transfer.send(new ListFileTransferResultsCommand({
+  ConnectorId: 'c-0123456789abcdef0', TransferId: sent.TransferId,
+}));
+const files = results.FileTransferResults;
+const nextToken = results.NextToken;`,
+      py: `sent = transfer.start_file_transfer(ConnectorId="c-0123456789abcdef0",
+    SendFilePaths=["/my-bucket/out/report.csv"], RemoteDirectoryPath="/incoming")
+results = transfer.list_file_transfer_results(
+    ConnectorId="c-0123456789abcdef0", TransferId=sent["TransferId"])
+files = results["FileTransferResults"]
+next_token = results.get("NextToken")`,
+    },
+    {
+      id: 'svc-firehose',
+      title: 'Firehose record',
+      note: 'DirectPut delivery stream. Role needs firehose:PutRecord on the stream ARN. Newline-delimit JSON before Firehose concatenates the records in S3.',
+      js: `await firehose.send(new FirehosePutRecordCommand({
+  DeliveryStreamName: 'my-firehose',
+  Record: { Data: Buffer.from(JSON.stringify({ sensor: 'sensor-1', temperature: 23.5 }) + String.fromCharCode(10)) },
+}));`,
+      py: `firehose.put_record(DeliveryStreamName="my-firehose",
+    Record={"Data": (json.dumps({"sensor": "sensor-1", "temperature": 23.5}) + chr(10)).encode()})`,
+    },
+    {
+      id: 'svc-glue-job',
+      title: 'Glue start job + status',
+      note: 'Existing job with an execution role and the Glue security configuration attached. GetJobRun is a status check; poll later or use Step Functions for completion.',
+      js: `const run = await glue.send(new StartJobRunCommand({
+  JobName: 'my-etl', Arguments: { '--input': 's3://my-bucket/in/', '--output': 's3://my-bucket/out/' },
+}));
+const status = await glue.send(new GetJobRunCommand({ JobName: 'my-etl', RunId: run.JobRunId }));
+const state = status.JobRun.JobRunState;`,
+      py: `run = glue.start_job_run(JobName="my-etl",
+    Arguments={"--input": "s3://my-bucket/in/", "--output": "s3://my-bucket/out/"})
+status = glue.get_job_run(JobName="my-etl", RunId=run["JobRunId"])
+state = status["JobRun"]["JobRunState"]`,
+    },
+    {
+      id: 'svc-glue-crawler',
+      title: 'Glue start crawler',
+      note: 'Existing crawler with its role, S3 target and security configuration. StartCrawler fails with CrawlerRunningException if it is already running.',
+      js: `await glue.send(new StartCrawlerCommand({ Name: 'my-crawler' }));`,
+      py: `glue.start_crawler(Name="my-crawler")`,
+    },
+    {
+      id: 'svc-scheduler',
+      title: 'Scheduler one-time Lambda invocation',
+      note: 'Use an existing schedule group, execution role and DLQ from Powertools. Caller needs scheduler:CreateSchedule and iam:PassRole. Set RUN_AT to a future UTC timestamp (YYYY-MM-DDTHH:MM:SS).',
+      js: `await scheduler.send(new CreateScheduleCommand({
+  Name: 'report-42', GroupName: 'my-scheduler',
+  ScheduleExpression: 'at(' + process.env.RUN_AT + ')', ScheduleExpressionTimezone: 'UTC',
+  FlexibleTimeWindow: { Mode: 'OFF' }, ActionAfterCompletion: 'DELETE',
+  Target: {
+    Arn: process.env.TARGET_ARN, RoleArn: process.env.SCHEDULER_ROLE_ARN,
+    Input: JSON.stringify({ reportId: '42' }),
+    DeadLetterConfig: { Arn: process.env.DLQ_ARN },
+    RetryPolicy: { MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3 },
+  },
+}));`,
+      py: `scheduler.create_schedule(Name="report-42", GroupName="my-scheduler",
+    ScheduleExpression="at(" + os.environ["RUN_AT"] + ")", ScheduleExpressionTimezone="UTC",
+    FlexibleTimeWindow={"Mode": "OFF"}, ActionAfterCompletion="DELETE",
+    Target={"Arn": os.environ["TARGET_ARN"], "RoleArn": os.environ["SCHEDULER_ROLE_ARN"],
+        "Input": json.dumps({"reportId": "42"}), "DeadLetterConfig": {"Arn": os.environ["DLQ_ARN"]},
+        "RetryPolicy": {"MaximumEventAgeInSeconds": 3600, "MaximumRetryAttempts": 3}})`,
+    },
+    {
+      id: 'svc-datasync',
+      title: 'DataSync task execution',
+      note: 'Existing AWS-to-AWS task (for example S3 to S3 needs no agent). Caller needs datasync:StartTaskExecution and datasync:DescribeTaskExecution. Poll the execution ARN later.',
+      js: `const started = await datasync.send(new StartTaskExecutionCommand({
+  TaskArn: 'arn:aws:datasync:eu-central-1:111122223333:task/task-0123456789abcdef0',
+}));
+const status = await datasync.send(new DescribeTaskExecutionCommand({ TaskExecutionArn: started.TaskExecutionArn }));
+const state = status.Status;`,
+      py: `started = datasync.start_task_execution(
+    TaskArn="arn:aws:datasync:eu-central-1:111122223333:task/task-0123456789abcdef0")
+status = datasync.describe_task_execution(TaskExecutionArn=started["TaskExecutionArn"])
+state = status["Status"]`,
     },
   ],
 };

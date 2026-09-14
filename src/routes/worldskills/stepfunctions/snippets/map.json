@@ -1,0 +1,43 @@
+{
+  "QueryLanguage": "JSONPath",
+  "StartAt": "EachItem",
+  "States": {
+    "EachItem": {
+      "Type": "Map",
+      "ItemsPath": "$.items",
+      "ItemSelector": {
+        "orderId.$": "$.orderId",
+        "index.$": "$$.Map.Item.Index",
+        "item.$": "$$.Map.Item.Value"
+      },
+      "MaxConcurrency": 2,
+      "ItemProcessor": {
+        "ProcessorConfig": {
+          "Mode": "INLINE"
+        },
+        "StartAt": "ReadItem",
+        "States": {
+          "ReadItem": {
+            "Type": "Pass",
+            "Parameters": {
+              "orderId.$": "$.orderId",
+              "index.$": "$.index",
+              "sku.$": "$.item.sku"
+            },
+            "End": true
+          }
+        }
+      },
+      "ResultPath": "$.processed",
+      "Next": "Read"
+    },
+    "Read": {
+      "Type": "Pass",
+      "Parameters": {
+        "orderId.$": "$.orderId",
+        "lines.$": "$.processed"
+      },
+      "End": true
+    }
+  }
+}

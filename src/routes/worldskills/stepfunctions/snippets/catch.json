@@ -1,0 +1,41 @@
+{
+  "QueryLanguage": "JSONPath",
+  "StartAt": "Try",
+  "States": {
+    "Try": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "Fail",
+          "States": {
+            "Fail": {
+              "Type": "Fail",
+              "Error": "OutOfStock",
+              "Cause": "No stock available"
+            }
+          }
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "Recover"
+        }
+      ],
+      "Next": "Done"
+    },
+    "Recover": {
+      "Type": "Pass",
+      "Parameters": {
+        "orderId.$": "$.orderId",
+        "error.$": "$.error.Error",
+        "cause.$": "$.error.Cause"
+      },
+      "End": true
+    },
+    "Done": {
+      "Type": "Succeed"
+    }
+  }
+}

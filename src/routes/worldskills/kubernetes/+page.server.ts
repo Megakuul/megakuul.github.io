@@ -10,7 +10,7 @@ export const trailingSlash = 'always';
 export const load: PageServerLoad = async () => {
   const highlighter = await createHighlighter({
     themes: [dracula],
-    langs: ['yaml', 'bash', 'json'],
+    langs: ['yaml', 'bash', 'json', 'ini'],
   });
 
   const render = (code: string, lang: string) =>

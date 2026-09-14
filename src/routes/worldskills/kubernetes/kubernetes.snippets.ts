@@ -489,6 +489,195 @@ spec:
   ],
 };
 
-export const groups: Group[] = [access, helpers, workloads, identity, storage, karpenter];
+const integrations: Group = {
+  id: 'service-integrations',
+  title: 'AWS service integrations',
+  blurb: 'Device telemetry, file imports, ETL schedules and application log delivery from pods.',
+  snippets: [
+    {
+      id: 'integration-identity',
+      title: 'ServiceAccount + Pod Identity',
+      note: 'Install the Pod Identity agent first (IAM for pods above). ROLE_ARN must trust pods.eks.amazonaws.com with sts:AssumeRole and sts:TagSession, scoped to this cluster, namespace and service account. Attach only the policy needed by the workload below; use a separate account/role for each workload.',
+      lang: 'bash',
+      code: `kubectl create namespace integrations
+kubectl create serviceaccount aws-worker -n integrations
+aws eks create-pod-identity-association --cluster-name my-cluster --namespace integrations --service-account aws-worker --role-arn "$ROLE_ARN"`,
+    },
+    {
+      id: 'integration-iot-policy',
+      title: 'IoT publisher permissions',
+      note: 'Attach to the pod role. The HTTPS publisher uses IAM signing; MQTT clients using X.509 certificates require a separate IoT policy.',
+      lang: 'json',
+      code: `{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Action": "iot:DescribeEndpoint", "Resource": "*" },
+    { "Effect": "Allow", "Action": "iot:Publish", "Resource": "arn:aws:iot:eu-central-1:111122223333:topic/devices/sensor-1/telemetry" }
+  ]
+}`,
+    },
+    {
+      id: 'integration-iot',
+      title: 'IoT telemetry Job',
+      note: 'Uses the service account and policy above. A software device is enough to test the rule/Lambda/Firehose path.',
+      lang: 'yaml',
+      code: `apiVersion: batch/v1
+kind: Job
+metadata:
+  name: iot-publish
+  namespace: integrations
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      serviceAccountName: aws-worker
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: publish
+          image: public.ecr.aws/aws-cli/aws-cli:2
+          command: [/bin/sh, -ec]
+          args:
+            - |
+              endpoint=$(aws iot describe-endpoint --endpoint-type iot:Data-ATS --query endpointAddress --output text)
+              aws iot-data publish --endpoint-url "https://$endpoint" --topic devices/sensor-1/telemetry --qos 1 --cli-binary-format raw-in-base64-out --payload '{"temperature":23.5}'
+          env:
+            - { name: AWS_REGION, value: eu-central-1 }
+            - { name: AWS_DEFAULT_REGION, value: eu-central-1 }
+            - { name: AWS_EC2_METADATA_DISABLED, value: "true" }
+            - { name: AWS_PAGER, value: "" }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+            seccompProfile: { type: RuntimeDefault }`,
+    },
+    {
+      id: 'integration-transfer',
+      title: 'Transfer S3 upload \u2192 processing Job',
+      note: 'For an S3-backed Transfer server, consume uploaded objects through S3. Set the completed object key; create one Job per completion event. Pod role needs s3:GetObject on uploads/* (plus kms:Decrypt for SSE-KMS). Replace the worker image with your processor.',
+      lang: 'yaml',
+      code: `apiVersion: batch/v1
+kind: Job
+metadata:
+  name: process-upload-42
+  namespace: integrations
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      serviceAccountName: aws-worker
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      initContainers:
+        - name: download
+          image: public.ecr.aws/aws-cli/aws-cli:2
+          args: [s3, cp, "s3://my-transfer-bucket/uploads/report.csv", /data/report.csv, --only-show-errors]
+          env:
+            - { name: AWS_REGION, value: eu-central-1 }
+            - { name: AWS_DEFAULT_REGION, value: eu-central-1 }
+            - { name: AWS_EC2_METADATA_DISABLED, value: "true" }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+      containers:
+        - name: process
+          image: 111122223333.dkr.ecr.eu-central-1.amazonaws.com/file-worker:1
+          args: [/data/report.csv]
+          volumeMounts:
+            - { name: data, mountPath: /data }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: "1", memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+      volumes:
+        - name: data
+          emptyDir: { sizeLimit: 1Gi }`,
+    },
+    {
+      id: 'integration-glue',
+      title: 'Glue ETL CronJob',
+      note: 'Pod role needs glue:StartJobRun on arn:aws:glue:eu-central-1:111122223333:job/my-etl. The Glue job has its own data-access role and security configuration. Set MaxConcurrentRuns=1 on the Glue job too: Kubernetes concurrencyPolicy only covers the short submission Job.',
+      lang: 'yaml',
+      code: `apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: glue-etl
+  namespace: integrations
+spec:
+  schedule: "0 * * * *"
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 120
+      template:
+        spec:
+          serviceAccountName: aws-worker
+          restartPolicy: Never
+          containers:
+            - name: submit
+              image: public.ecr.aws/aws-cli/aws-cli:2
+              args: [glue, start-job-run, --job-name, my-etl]
+              env:
+                - { name: AWS_REGION, value: eu-central-1 }
+                - { name: AWS_DEFAULT_REGION, value: eu-central-1 }
+                - { name: AWS_EC2_METADATA_DISABLED, value: "true" }
+              resources:
+                requests: { cpu: 100m, memory: 128Mi }
+                limits: { cpu: 500m, memory: 256Mi }
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                allowPrivilegeEscalation: false
+                capabilities: { drop: [ALL] }`,
+    },
+    {
+      id: 'integration-firehose',
+      title: 'Fluent Bit \u2192 Firehose',
+      note: 'Merge into the existing Fluent Bit ConfigMap and restart its DaemonSet. Associate its ServiceAccount with an IAM role allowing firehose:PutRecordBatch on this stream. Requires a Fluent Bit build with the kinesis_firehose output (AWS for Fluent Bit includes it).',
+      lang: 'ini',
+      code: `[OUTPUT]
+    Name                  kinesis_firehose
+    Match                 kube.*
+    region                eu-central-1
+    delivery_stream       my-firehose
+    time_key              timestamp
+    auto_retry_requests   true
+    Retry_Limit           5`,
+    },
+  ],
+};
+
+export const groups: Group[] = [
+  access,
+  helpers,
+  workloads,
+  identity,
+  storage,
+  karpenter,
+  integrations,
+];
 
 export default groups;

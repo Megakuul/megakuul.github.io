@@ -38,6 +38,12 @@ export interface Recipe {
   env?: EnvVariable[];
   command?: string;
   cliCommand?: string;
+  serviceOnly?: {
+    command: string;
+    templateFile: string;
+    document: CloudFormationTemplate;
+    cfnTagNote: string | null;
+  };
   templateFile?: string;
   cfnTagNote?: string | null;
   resourceTemplate?: CloudFormationTemplate;

@@ -1,0 +1,22 @@
+import { util } from '@aws-appsync/utils';
+import * as ddb from '@aws-appsync/utils/dynamodb';
+
+export function request(ctx) {
+  if (util.authType() !== 'User Pool Authorization' || !ctx.identity?.sub) {
+    util.unauthorized();
+  }
+  const owner = ctx.identity.sub;
+  const id = util.autoId();
+  const title = ctx.args.title.trim();
+  if (!title || title.length > 200) util.error('Title: 1–200 characters', 'BadRequest');
+  return ddb.put({
+    key: { pk: `USER#${owner}`, sk: `ITEM#${id}` },
+    item: { id, owner, title, version: 1 },
+    condition: { pk: { attributeExists: false } },
+  });
+}
+
+export function response(ctx) {
+  if (ctx.error) util.error(ctx.error.message, ctx.error.type);
+  return ctx.result;
+}

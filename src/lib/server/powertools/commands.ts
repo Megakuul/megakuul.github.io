@@ -1,5 +1,5 @@
 import { lambdaZip } from './lambda-zip';
-import type { CloudFormationTemplate } from '$lib/powertools/types';
+import type { CloudFormationTemplate, Recipe } from '$lib/powertools/types';
 /** Render CloudFormation submissions and emergency CLI commands from the same template. */
 const quote = (s: string) => "'" + s.replaceAll("'", "'\"'\"'") + "'";
 const expr = (code: string) => ({ __jq: code });
@@ -45,6 +45,7 @@ function compiler(template: CloudFormationTemplate) {
     Fifo: 'FIFO',
     DLQName: 'DLQ_NAME',
     AccessLogName: 'ACCESS_LOG_NAME',
+    TargetArn: 'TARGET_ARN',
   };
   const nameFields: Record<string, string> = {
     'AWS::IAM::Role': 'RoleName',
@@ -65,6 +66,11 @@ function compiler(template: CloudFormationTemplate) {
     'AWS::EC2::SecurityGroup': 'GroupName',
     'AWS::ECR::Repository': 'RepositoryName',
     'AWS::ECS::Cluster': 'ClusterName',
+    'AWS::DynamoDB::Table': 'TableName',
+    'AWS::ApiGateway::RestApi': 'Name',
+    'AWS::ApiGateway::Stage': 'StageName',
+    'AWS::ApiGatewayV2::Api': 'Name',
+    'AWS::ApiGatewayV2::Stage': 'StageName',
     'AWS::SecretsManager::Secret': 'Name',
     'AWS::AppConfig::Application': 'Name',
     'AWS::AppConfig::Environment': 'Name',
@@ -74,11 +80,19 @@ function compiler(template: CloudFormationTemplate) {
     'AWS::Athena::WorkGroup': 'Name',
     'AWS::Kinesis::Stream': 'Name',
     'AWS::AccessAnalyzer::Analyzer': 'AnalyzerName',
+    'AWS::Logs::LogStream': 'LogStreamName',
+    'AWS::IoT::ScheduledAudit': 'ScheduledAuditName',
+    'AWS::KinesisFirehose::DeliveryStream': 'DeliveryStreamName',
+    'AWS::Glue::SecurityConfiguration': 'Name',
+    'AWS::Scheduler::ScheduleGroup': 'Name',
+    'AWS::Scheduler::Schedule': 'Name',
   };
   function name(id: string): string {
     const r = resources[id],
       p = r.Properties ?? {};
     if (p[nameFields[r.Type]]) return c(p[nameFields[r.Type]]);
+    if (r.Type === 'AWS::IAM::ManagedPolicy')
+      return '((env.NAME | gsub("[^A-Za-z0-9+=,.@_-]"; "-"))[0:64]+"-' + id + '")';
     if (r.Type === 'AWS::S3::Bucket') return '(env.NAME[0:24]+"-"+env.ACCOUNT_ID+"-"+env.REGION)';
     return '(env.NAME+"-' + id + '")';
   }
@@ -115,9 +129,11 @@ function compiler(template: CloudFormationTemplate) {
         'AWS::CloudWatch::Alarm': ['cloudwatch', 'alarm:'],
         'AWS::ECR::Repository': ['ecr', 'repository/'],
         'AWS::ECS::Cluster': ['ecs', 'cluster/'],
+        'AWS::DynamoDB::Table': ['dynamodb', 'table/'],
         'AWS::StepFunctions::StateMachine': ['states', 'stateMachine:'],
         'AWS::Kinesis::Stream': ['kinesis', 'stream/'],
         'AWS::AccessAnalyzer::Analyzer': ['access-analyzer', 'analyzer/'],
+        'AWS::KinesisFirehose::DeliveryStream': ['firehose', 'deliverystream/'],
       } as Record<string, [string, string]>
     )[r.Type];
     if (kind)
@@ -164,6 +180,12 @@ function compiler(template: CloudFormationTemplate) {
         'AWS::AppConfig::ConfigurationProfile',
         'AWS::AppConfig::DeploymentStrategy',
         'AWS::GuardDuty::Detector',
+        'AWS::KMS::Key',
+        'AWS::ApiGateway::RestApi',
+        'AWS::ApiGateway::Deployment',
+        'AWS::ApiGatewayV2::Api',
+        'AWS::ApiGatewayV2::Integration',
+        'AWS::ApiGatewayV2::Route',
       ].includes(r.Type)
     )
       return 'env.R_' + key;
@@ -178,6 +200,8 @@ function compiler(template: CloudFormationTemplate) {
     if (v['Fn::GetAtt']) {
       const [id, key] = v['Fn::GetAtt'];
       if (key === 'GroupId' || key === 'Id') return reference(id);
+      if (key === 'ServerId' && resources[id].Type === 'AWS::Transfer::Server')
+        return 'env.R_' + id;
       if (key !== 'Arn') throw Error('Unknown attribute ' + key);
       return '(' + arn(id) + (resources[id].Type === 'AWS::Logs::LogGroup' ? '+":*"' : '') + ')';
     }
@@ -225,6 +249,18 @@ const cfnTagExceptions: Record<string, string> = {
   'AWS::IAM::InstanceProfile': 'instance profile',
   'AWS::Config::ConfigurationRecorder': 'Config recorder',
 };
+function cfnTagNote(template: CloudFormationTemplate) {
+  const untagged = [
+    ...new Set(
+      Object.values(template.Resources)
+        .map(r => cfnTagExceptions[r.Type])
+        .filter(Boolean),
+    ),
+  ];
+  return untagged.length
+    ? `CloudFormation cannot tag: ${untagged.join(', ')}. AWS CLI includes those tags.`
+    : null;
+}
 /** Keep the template as the default and direct API calls as the fallback. */
 export function creationCommands(
   resourceTemplate: CloudFormationTemplate,
@@ -233,27 +269,46 @@ export function creationCommands(
   cliOverride?: string,
 ) {
   const cli = cliOverride ?? directCommand(resourceTemplate, kind, inputs);
-  const untagged = [
-    ...new Set(
-      Object.values(resourceTemplate.Resources)
-        .map(r => cfnTagExceptions[r.Type])
-        .filter(Boolean),
-    ),
-  ];
+  const optionalPolicies = Object.entries(resourceTemplate.Resources)
+    .filter(
+      ([, resource]) =>
+        resource.Type === 'AWS::IAM::ManagedPolicy' &&
+        !['Roles', 'Users', 'Groups'].some(key => key in (resource.Properties ?? {})),
+    )
+    .map(([id]) => id);
+  let serviceOnly: Recipe['serviceOnly'];
+  if (optionalPolicies.length && !cliOverride) {
+    const document = structuredClone(resourceTemplate);
+    for (const id of optionalPolicies) delete document.Resources[id];
+    for (const [id, output] of Object.entries(document.Outputs ?? {})) {
+      if (optionalPolicies.includes(output.Value?.Ref)) delete document.Outputs![id];
+    }
+    const file = templateFile(`${kind}-service-only`);
+    serviceOnly = {
+      command: cfnCommand(document, kind, inputs, file),
+      templateFile: file,
+      document,
+      cfnTagNote: cfnTagNote(document),
+    };
+  }
   return {
     command: cfnCommand(resourceTemplate, kind, inputs),
     cliCommand: cli,
+    serviceOnly,
     resourceTemplate,
     document: resourceTemplate,
     templateFile: templateFile(kind),
     documentTitle: 'CloudFormation YAML',
-    cfnTagNote: untagged.length
-      ? `CloudFormation cannot tag: ${untagged.join(', ')}. AWS CLI includes those tags.`
-      : null,
+    cfnTagNote: cfnTagNote(resourceTemplate),
   };
 }
 /** A normal CLI invocation: download the matching YAML, then submit the stack. */
-function cfnCommand(template: CloudFormationTemplate, kind: string, inputs: string[] = ['NAME']) {
+function cfnCommand(
+  template: CloudFormationTemplate,
+  kind: string,
+  inputs: string[] = ['NAME'],
+  file = templateFile(kind),
+) {
   if (JSON.stringify(template.Resources).includes('Custom::'))
     throw Error('Deployment custom resources are not allowed');
   const envParams: Record<string, string> = {
@@ -266,6 +321,7 @@ function cfnCommand(template: CloudFormationTemplate, kind: string, inputs: stri
     ServiceAccount: 'SERVICE_ACCOUNT',
     VpcId: 'VPC_ID',
     GroupNames: 'SG_NAMES',
+    TargetArn: 'TARGET_ARN',
   };
   const parameterNames = Object.keys(template.Parameters).sort(
     (a, b) => Number(!a.startsWith('Tag')) - Number(!b.startsWith('Tag')),
@@ -284,26 +340,32 @@ function cfnCommand(template: CloudFormationTemplate, kind: string, inputs: stri
   if (template.Transform) capabilities.push('CAPABILITY_AUTO_EXPAND');
   const deploy = [
     `aws cloudformation create-stack --stack-name "${stackName(kind, inputs)}"`,
-    `--template-body file://${templateFile(kind)}`,
+    `--template-body file://${file}`,
     parameters.length ? '--parameters ' + parameters.join(' ') : '',
     '--tags "Key=${TAG_KEY:?Set TAG_KEY},Value=${TAG_VALUE:?Set TAG_VALUE}"',
     capabilities.length ? '--capabilities ' + capabilities.join(' ') : '',
   ]
     .filter(Boolean)
     .join(' ');
-  return `curl -fsSL https://megakuul.github.io/worldskills/powertools/templates/${templateFile(kind)} -o ${templateFile(kind)} && ${deploy}`;
+  return `curl -fsSL https://megakuul.github.io/worldskills/powertools/templates/${file} -o ${file} && ${deploy}`;
 }
 /** Build explicit AWS API calls; jq only serializes request JSON. */
 function cliSteps(template: CloudFormationTemplate) {
   const e = compiler(template),
     steps = [];
+  const apiBootstrap = Object.values(template.Resources).some(r =>
+    r.Type.startsWith('AWS::ApiGateway'),
+  );
   const request = (
     service: string,
     operation: string,
     payload: Record<string, any>,
     id = 'response',
   ) => {
-    const command = `aws ${service} ${operation} --cli-input-json "$(jq -cn ${quote(e.c(payload))})"`;
+    const retry =
+      apiBootstrap &&
+      ((service === 'apigateway' && operation === 'update-account') || service === 'wafv2');
+    const command = `${retry ? 'retry_api_setup ' : ''}aws ${service} ${operation} --cli-input-json "$(jq -cn ${quote(e.c(payload))})"`;
     steps.push(id === 'response' ? command : `result=$(${command})`);
   };
   const output = (id: string, field: string, key = 'R') =>
@@ -317,6 +379,105 @@ function cliSteps(template: CloudFormationTemplate) {
       a = expr(e.arn(id)),
       t = p.Tags ?? tags;
     switch (r.Type) {
+      case 'AWS::KMS::Key':
+        request(
+          'kms',
+          'create-key',
+          {
+            Description: p.Description,
+            KeySpec: p.KeySpec,
+            KeyUsage: p.KeyUsage,
+            Policy: j(p.KeyPolicy),
+            Tags: expr('(' + e.c(t) + ' | map({TagKey:.Key,TagValue:.Value}))'),
+          },
+          id,
+        );
+        output(id, '.KeyMetadata.KeyId');
+        output(id, '.KeyMetadata.Arn', 'A');
+        if (p.EnableKeyRotation) request('kms', 'enable-key-rotation', { KeyId: ref(id) });
+        break;
+      case 'AWS::KMS::Alias':
+        request('kms', 'create-alias', { AliasName: p.AliasName, TargetKeyId: p.TargetKeyId });
+        break;
+      case 'AWS::Logs::LogStream':
+        request('logs', 'create-log-stream', {
+          logGroupName: p.LogGroupName,
+          logStreamName: p.LogStreamName,
+        });
+        break;
+      case 'AWS::IoT::Logging':
+        request('iot', 'set-v2-logging-options', {
+          roleArn: p.RoleArn,
+          defaultLogLevel: p.DefaultLogLevel,
+          disableAllLogs: false,
+        });
+        break;
+      case 'AWS::IoT::AccountAuditConfiguration': {
+        const checks = Object.fromEntries(
+          Object.entries(p.AuditCheckConfigurations).map(([key, value]) => [
+            key
+              .replace(/^IoT/, 'Iot')
+              .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+              .toUpperCase()
+              .replace('MIS_CONFIGURATION', 'MISCONFIGURATION'),
+            { enabled: (value as { Enabled: boolean }).Enabled },
+          ]),
+        );
+        const sns = p.AuditNotificationTargetConfigurations.Sns;
+        request('iot', 'update-account-audit-configuration', {
+          roleArn: p.RoleArn,
+          auditCheckConfigurations: checks,
+          auditNotificationTargetConfigurations: {
+            SNS: { enabled: sns.Enabled, targetArn: sns.TargetArn, roleArn: sns.RoleArn },
+          },
+        });
+        break;
+      }
+      case 'AWS::IoT::ScheduledAudit':
+        request('iot', 'create-scheduled-audit', {
+          scheduledAuditName: n,
+          frequency: p.Frequency,
+          targetCheckNames: p.TargetCheckNames,
+          tags: expr('(' + e.c(t) + ' | map({Key:.Key,Value:.Value}))'),
+        });
+        break;
+      case 'AWS::Transfer::Server':
+        request('transfer', 'create-server', p, id);
+        output(id, '.ServerId');
+        break;
+      case 'AWS::KinesisFirehose::DeliveryStream':
+        request('firehose', 'create-delivery-stream', p);
+        break;
+      case 'AWS::Glue::SecurityConfiguration':
+        request('glue', 'create-security-configuration', {
+          Name: p.Name,
+          EncryptionConfiguration: {
+            S3Encryption: p.EncryptionConfiguration.S3Encryptions,
+            CloudWatchEncryption: p.EncryptionConfiguration.CloudWatchEncryption,
+            JobBookmarksEncryption: p.EncryptionConfiguration.JobBookmarksEncryption,
+          },
+        });
+        break;
+      case 'AWS::Glue::DataCatalogEncryptionSettings':
+        request('glue', 'put-data-catalog-encryption-settings', {
+          CatalogId: p.CatalogId,
+          DataCatalogEncryptionSettings: {
+            ...p.DataCatalogEncryptionSettings,
+            ConnectionPasswordEncryption: {
+              ReturnConnectionPasswordEncrypted:
+                p.DataCatalogEncryptionSettings.ConnectionPasswordEncryption
+                  .ReturnConnectionPasswordEncrypted,
+              AwsKmsKeyId: p.DataCatalogEncryptionSettings.ConnectionPasswordEncryption.KmsKeyId,
+            },
+          },
+        });
+        break;
+      case 'AWS::Scheduler::ScheduleGroup':
+        request('scheduler', 'create-schedule-group', p);
+        break;
+      case 'AWS::Scheduler::Schedule':
+        request('scheduler', 'create-schedule', p);
+        break;
       case 'AWS::Logs::LogGroup':
         request('logs', 'create-log-group', {
           logGroupName: n,
@@ -424,6 +585,104 @@ function cliSteps(template: CloudFormationTemplate) {
       case 'AWS::WAFv2::LoggingConfiguration':
         request('wafv2', 'put-logging-configuration', { LoggingConfiguration: p });
         break;
+      case 'AWS::WAFv2::WebACLAssociation':
+        request('wafv2', 'associate-web-acl', p);
+        break;
+      case 'AWS::ApiGatewayV2::Api':
+        request('apigatewayv2', 'create-api', { ...p, Tags: tagmap(t) }, id);
+        output(id, '.ApiId');
+        break;
+      case 'AWS::ApiGatewayV2::Integration':
+        request('apigatewayv2', 'create-integration', p, id);
+        output(id, '.IntegrationId');
+        break;
+      case 'AWS::ApiGatewayV2::Route':
+        request('apigatewayv2', 'create-route', p, id);
+        output(id, '.RouteId');
+        break;
+      case 'AWS::ApiGatewayV2::Stage':
+        request('apigatewayv2', 'create-stage', { ...p, Tags: tagmap(t) });
+        break;
+      case 'AWS::ApiGateway::RestApi':
+        request(
+          'apigateway',
+          'create-rest-api',
+          {
+            name: p.Name,
+            description: p.Description,
+            endpointConfiguration: { types: p.EndpointConfiguration.Types },
+            securityPolicy: p.SecurityPolicy,
+            endpointAccessMode: p.EndpointAccessMode,
+            disableExecuteApiEndpoint: p.DisableExecuteApiEndpoint,
+            tags: tagmap(t),
+          },
+          id,
+        );
+        output(id, '.id');
+        steps.push(
+          `jq -cn ${quote(e.c(p.Body))} > "$d/api.json"`,
+          `aws apigateway put-rest-api --rest-api-id "$(jq -nr ${quote(e.c(ref(id)))})" --mode ${quote(p.Mode)} --fail-on-warnings --body "fileb://$d/api.json"`,
+        );
+        break;
+      case 'AWS::ApiGateway::Account':
+        request('apigateway', 'update-account', {
+          patchOperations: [
+            { op: 'replace', path: '/cloudwatchRoleArn', value: p.CloudWatchRoleArn },
+          ],
+        });
+        break;
+      case 'AWS::ApiGateway::Deployment':
+        request(
+          'apigateway',
+          'create-deployment',
+          { restApiId: p.RestApiId, description: p.Description },
+          id,
+        );
+        output(id, '.id');
+        break;
+      case 'AWS::ApiGateway::Stage': {
+        request('apigateway', 'create-stage', {
+          restApiId: p.RestApiId,
+          stageName: p.StageName,
+          deploymentId: p.DeploymentId,
+          tracingEnabled: p.TracingEnabled,
+          cacheClusterEnabled: p.CacheClusterEnabled,
+          tags: tagmap(t),
+        });
+        const settingPaths: Record<string, string> = {
+          LoggingLevel: 'logging/loglevel',
+          DataTraceEnabled: 'logging/dataTrace',
+          MetricsEnabled: 'metrics/enabled',
+          ThrottlingBurstLimit: 'throttling/burstLimit',
+          ThrottlingRateLimit: 'throttling/rateLimit',
+          CachingEnabled: 'caching/enabled',
+          CacheDataEncrypted: 'caching/dataEncrypted',
+          RequireAuthorizationForCacheControl: 'caching/requireAuthorizationForCacheControl',
+          UnauthorizedCacheControlHeaderStrategy: 'caching/unauthorizedCacheControlHeaderStrategy',
+        };
+        request('apigateway', 'update-stage', {
+          restApiId: p.RestApiId,
+          stageName: p.StageName,
+          patchOperations: [
+            {
+              op: 'replace',
+              path: '/accessLogSettings/destinationArn',
+              value: p.AccessLogSetting.DestinationArn,
+            },
+            { op: 'replace', path: '/accessLogSettings/format', value: p.AccessLogSetting.Format },
+            ...p.MethodSettings.flatMap((setting: Record<string, any>) =>
+              Object.entries(settingPaths)
+                .filter(([field]) => setting[field] !== undefined)
+                .map(([field, path]) => ({
+                  op: 'replace',
+                  path: `/${setting.ResourcePath === '/*' ? '*' : setting.ResourcePath}/${setting.HttpMethod}/${path}`,
+                  value: String(setting[field]),
+                })),
+            ),
+          ],
+        });
+        break;
+      }
       case 'AWS::S3::Bucket':
         request('s3api', 'create-bucket', {
           Bucket: n,
@@ -528,7 +787,7 @@ function cliSteps(template: CloudFormationTemplate) {
           };
         steps.push(
           `jq -cn ${quote(e.c(input))} > "$d/request.json"`,
-          `aws lambda create-function --cli-input-json "file://$d/request.json" --zip-file "fileb://$d/function.zip"`,
+          `${apiBootstrap ? 'retry_api_setup ' : ''}aws lambda create-function --cli-input-json "file://$d/request.json" --zip-file "fileb://$d/function.zip"`,
           `aws lambda wait function-active-v2 --function-name "$(jq -nr ${quote(e.name(id))})"`,
         );
         break;
@@ -569,6 +828,31 @@ function cliSteps(template: CloudFormationTemplate) {
         break;
       case 'AWS::Events::EventBus':
         request('events', 'create-event-bus', { Name: n, Tags: t });
+        break;
+      case 'AWS::DynamoDB::Table':
+        request('dynamodb', 'create-table', {
+          TableName: n,
+          BillingMode: p.BillingMode,
+          TableClass: p.TableClass,
+          AttributeDefinitions: p.AttributeDefinitions,
+          KeySchema: p.KeySchema,
+          SSESpecification: p.SSESpecification
+            ? {
+                Enabled: p.SSESpecification.SSEEnabled,
+                SSEType: p.SSESpecification.SSEType,
+                KMSMasterKeyId: p.SSESpecification.KMSMasterKeyId,
+              }
+            : undefined,
+          DeletionProtectionEnabled: p.DeletionProtectionEnabled,
+          ResourcePolicy: p.ResourcePolicy ? j(p.ResourcePolicy.PolicyDocument) : undefined,
+          Tags: t,
+        });
+        steps.push(`aws dynamodb wait table-exists --table-name "$(jq -nr ${quote(e.name(id))})"`);
+        if (p.PointInTimeRecoverySpecification)
+          request('dynamodb', 'update-continuous-backups', {
+            TableName: n,
+            PointInTimeRecoverySpecification: p.PointInTimeRecoverySpecification,
+          });
         break;
       case 'AWS::ECR::Repository':
         request('ecr', 'create-repository', {
@@ -730,7 +1014,7 @@ function cliSteps(template: CloudFormationTemplate) {
           'ec2',
           'create-security-group',
           {
-            GroupName: p.GroupName,
+            GroupName: p.GroupName ?? n,
             Description: p.GroupDescription,
             VpcId: p.VpcId,
             TagSpecifications: [{ ResourceType: 'security-group', Tags: t }],
@@ -742,6 +1026,19 @@ function cliSteps(template: CloudFormationTemplate) {
           GroupId: ref(id),
           IpPermissions: [{ IpProtocol: '-1', IpRanges: [{ CidrIp: '0.0.0.0/0' }] }],
         });
+        for (const rule of p.SecurityGroupIngress ?? [])
+          request('ec2', 'authorize-security-group-ingress', {
+            GroupId: ref(id),
+            IpPermissions: [
+              {
+                IpProtocol: rule.IpProtocol,
+                FromPort: rule.FromPort,
+                ToPort: rule.ToPort,
+                IpRanges: [{ CidrIp: rule.CidrIp }],
+              },
+            ],
+            TagSpecifications: [{ ResourceType: 'security-group-rule', Tags: t }],
+          });
         steps.push(
           `if err=$(aws ec2 revoke-security-group-egress --group-id "$R_${id}" --ip-permissions '[{"IpProtocol":"-1","Ipv6Ranges":[{"CidrIpv6":"::/0"}]}]' 2>&1); then :; elif [[ "$err" != *"(InvalidPermission.NotFound)"* ]]; then printf '%s\\n' "$err" >&2; exit 1; fi`,
         );
@@ -785,7 +1082,11 @@ function directCommand(
   kind: string,
   inputs: string[] = ['NAME'],
 ) {
-  const simple = simpleCommand(kind);
+  // A short service-only command would omit the optional access policies.
+  const hasPolicies = Object.values(template.Resources).some(
+    resource => resource.Type === 'AWS::IAM::ManagedPolicy',
+  );
+  const simple = hasPolicies ? null : simpleCommand(kind);
   if (simple) return simple;
   const source = structuredClone(template);
   if (kind === 'security-groups') {
@@ -802,6 +1103,10 @@ function directCommand(
     `export NAME=${inputs.includes('NAME') ? '"$NAME"' : inputs.includes('ROLE_NAME') ? '"$ROLE_NAME"' : quote(stackName(kind, inputs))}`,
     ...identity(),
   ];
+  if (['http-api', 'rest-api'].includes(kind))
+    steps.push(
+      'retry_api_setup() { local attempt status; for attempt in 1 2 3 4 5 6; do if "$@" 2>"$d/retry-error"; then return 0; else status=$?; fi; cat "$d/retry-error" >&2; if [ "$attempt" -eq 6 ] || ! grep -Eq "cannot be assumed|does not have required permissions|WAFUnavailableEntityException|WAFNonexistentItemException|WAFLogDestinationPermissionIssueException" "$d/retry-error"; then return "$status"; fi; sleep "$((2 ** attempt))"; done; }',
+    );
   if (template.Parameters?.RoleArn)
     steps.push(
       'ROLE_ARN=$(aws iam get-role --role-name "$ROLE_NAME" --query Role.Arn --output text)',
@@ -813,6 +1118,12 @@ function directCommand(
       `for SG_NAME in "\${names[@]}"; do export SG_NAME && ${cliSteps(source).join(' && ')} || exit $?; done`,
     );
   else steps.push(...cliSteps(source));
+  if (['http-api', 'rest-api'].includes(kind)) {
+    const outputs = Object.fromEntries(
+      Object.entries(source.Outputs ?? {}).map(([name, output]) => [name, output.Value]),
+    );
+    steps.push(`jq -n ${quote(compiler(source).c(outputs))}`);
+  }
   const body = steps.filter(step => !identity().includes(step)).join(' ');
   return shell(
     /env\.(ACCOUNT_ID|PARTITION)|\$(ACCOUNT_ID|PARTITION)/.test(body)

@@ -24,6 +24,9 @@ export const cloudConfigs = [
     title: 'ECS Host',
     file: 'ecs-host.yaml',
   },
+  { id: 'iot-publisher', title: 'IoT Publisher', file: 'iot-publisher.yaml' },
+  { id: 'transfer-client', title: 'Transfer SFTP Client', file: 'transfer-client.yaml' },
+  { id: 'firehose-publisher', title: 'Firehose Publisher', file: 'firehose-publisher.yaml' },
 ].map(snippet => ({ ...snippet, download: root + snippet.file }));
 
 /** @param {...Record<string, unknown>} Statement */
@@ -125,6 +128,40 @@ export const policies = [
       },
     ),
   },
+  {
+    id: 'iot-publish-policy',
+    title: 'IoT Publish',
+    lang: 'json',
+    code: document(
+      { Effect: 'Allow', Action: 'iot:DescribeEndpoint', Resource: '*' },
+      {
+        Effect: 'Allow',
+        Action: 'iot:Publish',
+        Resource: 'arn:aws:iot:eu-central-1:111122223333:topic/devices/sensor-1/telemetry',
+      },
+    ),
+  },
+  {
+    id: 'transfer-key-policy',
+    title: 'Transfer SSH Key',
+    lang: 'json',
+    code: document({
+      Effect: 'Allow',
+      Action: 'secretsmanager:GetSecretValue',
+      Resource:
+        'arn:aws:secretsmanager:eu-central-1:111122223333:secret:transfer/uploader-key-AbCdEf',
+    }),
+  },
+  {
+    id: 'firehose-put-policy',
+    title: 'Firehose PutRecord',
+    lang: 'json',
+    code: document({
+      Effect: 'Allow',
+      Action: 'firehose:PutRecord',
+      Resource: 'arn:aws:firehose:eu-central-1:111122223333:deliverystream/my-firehose',
+    }),
+  },
 ];
 export const operations = [
   {
@@ -162,5 +199,23 @@ export const operations = [
     title: 'Restart App',
     lang: 'bash',
     code: 'sudo systemctl restart app && sudo systemctl is-active app',
+  },
+  {
+    id: 'iot-logs',
+    title: 'IoT Publisher Logs',
+    lang: 'bash',
+    code: 'sudo systemctl status iot-publish.timer --no-pager; sudo journalctl -u iot-publish -n 100 --no-pager',
+  },
+  {
+    id: 'transfer-upload',
+    title: 'Upload with SFTP',
+    lang: 'bash',
+    code: 'sudo install -o app -g app -m 0600 ./report.csv /var/lib/transfer/report.csv && sudo systemctl start transfer-upload; sudo journalctl -u transfer-upload -n 100 --no-pager',
+  },
+  {
+    id: 'firehose-logs',
+    title: 'Firehose Publisher Logs',
+    lang: 'bash',
+    code: 'sudo systemctl status firehose-publish.timer --no-pager; sudo journalctl -u firehose-publish -n 100 --no-pager',
   },
 ];

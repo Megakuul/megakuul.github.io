@@ -1,0 +1,26 @@
+import { util } from '@aws-appsync/utils';
+
+export function request(ctx) {
+  if (util.authType() !== 'User Pool Authorization' || !ctx.identity?.sub) {
+    util.unauthorized();
+  }
+  const owner = ctx.identity.sub;
+  return {
+    operation: 'PutEvents',
+    events: [
+      {
+        source: 'worldskills.appsync',
+        detailType: 'ItemRequested',
+        detail: { owner, input: ctx.args.input },
+      },
+    ],
+  };
+}
+
+export function response(ctx) {
+  if (ctx.error) util.error('EventBridge request failed', ctx.error.type);
+  if (ctx.result.FailedEntryCount > 0) {
+    util.error('Event was not accepted', 'EventBridgeError');
+  }
+  return ctx.result.Entries[0].EventId;
+}
