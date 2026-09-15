@@ -1,5 +1,11 @@
 ## Table of Contents
 
+## Tags
+
+- Tag every supported resource, including API Gateway, Lambda, DynamoDB, VPC, GuardDuty and streaming analytics
+- Launch template tags plus instance, volume and network-interface tag specifications
+- ASG tags propagate to launched instances
+
 ## IAM
 
 - IAM Access Analyzer enabled
@@ -8,49 +14,81 @@
 
 - VPC Encryption Controls (monitor)
 - Flow logs enabled on every VPC
-- Security groups have no `0.0.0.0/0` on anything but 80/443
-- Gateway VPC endpoints for S3 and DynamoDB
+- No inbound SSH; use SSM Session Manager
+- No unrestricted `0.0.0.0/0` or `::/0` ingress; allow source security groups, required client networks or the CloudFront origin-facing prefix list
+- Gateway VPC endpoints for S3 and DynamoDB; ECR API/DKR interface endpoints where required
+- Endpoint private DNS, security groups and route-table associations configured
 
 ## EC2 & Auto Scaling
 
 - EBS volumes encrypted at rest (account settings)
 - ASG spans multiple AZs
 - ASG health check type set to `ELB`, not just `EC2`
+- Target-tracking scaling policy configured; minimum two instances when availability is required
+- Instance status-check alarms and detailed monitoring enabled
+- Application instances in private subnets; IMDSv2 required
 
 ## Elastic Load Balancing
 
 - Deletion protection enabled
 - Access logs enabled
 - Cross-zone load balancing enabled
-- WAF Web ACL attached (ALB)
+- WAF Web ACL attached (ALB); managed rules enforce their actions, not just COUNT
 
 ## S3
 
 - Block Public Access enabled
 - Versioning enabled
-- Object Lock enabled at bucket creation (only doable then, safe to flip even with no retention set yet)
+- Default encryption enabled
+- Lifecycle rules enabled for application, source, artifact and log buckets; retention matches the workload
+- Object Lock only when required; also supported on existing buckets, but cannot be disabled afterwards
 
 ## CloudFront
 
 - WAF Web ACL attached
 - Logging enabled
+- HTTPS viewer access, compression and appropriate caching policy
+- Private S3 origin with OAC; bucket policy scoped to the distribution
 
 ## Route 53
 
 - Alias records used instead of CNAME for AWS targets
 
-## RDS & Aurora (all automatically)
+## RDS & Aurora
 
 - Multi-AZ enabled
-- Backup retention > 0 (PITR possible)
+- Backup retention greater than 7 days
 - Encryption at rest enabled
 - Deletion protection enabled
 - Not publicly accessible
+- Database log exports enabled
 
 ## DynamoDB
 
 - Deletion protection
 - Point-in-time recovery enabled
+- Encryption at rest enabled; AWS-owned keys also encrypt the table
+- TTL enabled on the application's expiry attribute when required; the Powertool uses `expiresAt` as Unix seconds
+- Confirm whether the task requires an actual backup in addition to PITR
+
+## ECR
+
+- Immutable image tags, image scanning and encryption enabled
+- Lifecycle policy configured for unused images
+- Repository resource policy configured when required; separate from IAM pull/push policies
+
+## ECS
+
+- Enhanced Container Insights enabled
+- Every application/sidecar container has a log configuration
+- Service autoscaling policy configured, with at least two tasks when required
+- Fargate used when specified; service/task tags propagated
+
+## CodePipeline
+
+- Manual approval stage before deployment
+- Pipeline executes successfully after source upload/commit and approval
+- Source and artifact buckets encrypted, versioned and covered by lifecycle rules
 
 ## ElastiCache
 
@@ -69,8 +107,9 @@
 ## API Gateway
 
 - Throttling limits set
-- Access/execution logging enabled
-- WAF Web ACL attached
+- Access logging enabled; execution logging and X-Ray active tracing enabled for REST APIs
+- WAF Web ACL attached to REST API stage where required
+- Submit the HTTPS endpoint
 
 ## SQS & SNS
 
@@ -93,11 +132,13 @@
 
 - KMS key rotation enabled (off by default)
 - Sensitive SSM parameters are `SecureString`, not plain `String`
-- Secrets Manager rotation enabled
+- Secrets Manager rotation enabled; RDS-managed master secrets rotate automatically, generic secrets need a workload-specific rotation function
+- Parameter Store Intelligent-Tiering enabled for the account and Region
 
 ## GuardDuty & Security Hub
 
 - GuardDuty enabled (purely detective, off by default)
+- Findings export configured separately, with an encrypted S3 bucket and scoped KMS/bucket policies
 - Security Hub enabled to aggregate the findings
 
 ## CloudTrail & Config
@@ -148,6 +189,7 @@
 ## Data Firehose & Kinesis
 
 - Stream encryption enabled
+- Kinesis uses one provisioned shard when following the 2024 marking requirement
 - Delivery role restricted to the destination bucket/prefix and log stream
 - S3 destination encrypted and blocked from public access
 - Firehose delivery logging and failed-record prefix configured

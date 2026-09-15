@@ -974,6 +974,7 @@
       env:
         - name: TAG_KEY
           example: Project
+          hint: Creates a regional WAF with enforcing managed rules and logs. Attach the output WebACLArn to your ALB or REST API stage.
           required: true
         - name: TAG_VALUE
           example: my-app
@@ -1009,7 +1010,7 @@
                       VendorName: AWS
                       Name: AWSManagedRulesSQLiRuleSet
                   OverrideAction:
-                    Count: {}
+                    None: {}
                   VisibilityConfig:
                     CloudWatchMetricsEnabled: true
                     SampledRequestsEnabled: false
@@ -1021,7 +1022,7 @@
                       VendorName: AWS
                       Name: AWSManagedRulesKnownBadInputsRuleSet
                   OverrideAction:
-                    Count: {}
+                    None: {}
                   VisibilityConfig:
                     CloudWatchMetricsEnabled: true
                     SampledRequestsEnabled: false
@@ -1092,7 +1093,7 @@
           RateLimit:
             Value: 100000
           ManagedRules:
-            Value: COUNT
+            Value: BLOCK
           LogGroup:
             Value:
               Ref: WafLogs
@@ -1213,6 +1214,14 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
+              LifecycleConfiguration:
+                Rules:
+                  - Id: Cleanup
+                    Status: Enabled
+                    AbortIncompleteMultipartUpload:
+                      DaysAfterInitiation: 1
+                    NoncurrentVersionExpiration:
+                      NoncurrentDays: 90
           ConfigBucketPolicy:
             Type: AWS::S3::BucketPolicy
             Properties:

@@ -8,7 +8,7 @@
           example: my-function
           required: true
           type: string
-          hint: ''
+          hint: Bootstrap function; deploy your handler. Enable logging and X-Ray permissions on the execution role; configure an async failure destination for the workload.
           pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
         - name: ROLE_NAME
           example: my-app-role
@@ -64,6 +64,8 @@
                 ZipFile: exports.handler=async()=>{throw new Error("Deploy application code before invoking this function.");};
               MemorySize: 256
               Timeout: 10
+              TracingConfig:
+                Mode: Active
               Architectures:
                 - arm64
               LoggingConfig:
@@ -1373,12 +1375,22 @@
         Parameters:
           Name:
             Type: String
+            AllowedPattern: '[A-Za-z0-9_-]{1,70}(?:\.fifo)?'
           TagKey:
             Type: String
             Default: Project
           TagValue:
             Type: String
             Default: powertools
+        Conditions:
+          IsFifo:
+            Fn::Equals:
+              - Fn::Select:
+                  - 1
+                  - Fn::Split:
+                      - '.'
+                      - Fn::Sub: ${Name}.standard
+              - fifo
         Resources:
           DLQ:
             Type: AWS::SQS::Queue
@@ -1386,13 +1398,25 @@
             UpdateReplacePolicy: Retain
             Properties:
               QueueName:
-                Fn::Sub: ${Name}-dlq
+                Fn::If:
+                  - IsFifo
+                  - Fn::Join:
+                      - ''
+                      - - Fn::Select: [0, { Fn::Split: ['.', { Ref: Name }] }]
+                        - '-dlq.fifo'
+                  - Fn::Sub: ${Name}-dlq
+              FifoQueue:
+                Fn::If: [IsFifo, true, { Ref: 'AWS::NoValue' }]
+              ContentBasedDeduplication:
+                Fn::If: [IsFifo, true, { Ref: 'AWS::NoValue' }]
               SqsManagedSseEnabled: true
               MessageRetentionPeriod: 1209600
               ReceiveMessageWaitTimeSeconds: 20
               VisibilityTimeout: 180
               RedriveAllowPolicy:
-                redrivePermission: allowAll
+                redrivePermission: byQueue
+                sourceQueueArns:
+                  - Fn::Sub: arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:${Name}
               Tags:
                 - Key: MonitoringRole
                   Value: dlq
@@ -1407,6 +1431,10 @@
             Properties:
               QueueName:
                 Ref: Name
+              FifoQueue:
+                Fn::If: [IsFifo, true, { Ref: 'AWS::NoValue' }]
+              ContentBasedDeduplication:
+                Fn::If: [IsFifo, true, { Ref: 'AWS::NoValue' }]
               SqsManagedSseEnabled: true
               MessageRetentionPeriod: 345600
               ReceiveMessageWaitTimeSeconds: 20
@@ -1630,7 +1658,7 @@
           example: my-table
           required: true
           type: string
-          hint: String partition key pk and sort key sk. On-demand capacity, AWS-owned encryption, 35-day recovery and deletion protection.
+          hint: String partition key pk and sort key sk. On-demand capacity, AWS-owned encryption, 35-day recovery, deletion protection and TTL on expiresAt (Unix seconds; omit it for permanent items).
           pattern: '[A-Za-z0-9_.-]{3,64}'
         - name: TAG_KEY
           example: Project
@@ -1641,7 +1669,7 @@
       templateName: dynamodb
       template:
         AWSTemplateFormatVersion: 2010-09-09
-        Description: On-demand table with string pk/sk keys, AWS-owned encryption, 35-day point-in-time recovery, deletion protection and HTTPS-only access.
+        Description: On-demand table with string pk/sk keys, AWS-owned encryption, 35-day point-in-time recovery, deletion protection, expiresAt TTL and HTTPS-only access.
         Parameters:
           Name:
             Type: String
@@ -1677,6 +1705,9 @@
               PointInTimeRecoverySpecification:
                 PointInTimeRecoveryEnabled: true
                 RecoveryPeriodInDays: 35
+              TimeToLiveSpecification:
+                AttributeName: expiresAt
+                Enabled: true
               DeletionProtectionEnabled: true
               ResourcePolicy:
                 PolicyDocument:
@@ -1835,7 +1866,7 @@
           example: my-app/backend
           required: true
           type: string
-          hint: ''
+          hint: Immutable tags, scanning, lifecycle and a TLS-only repository policy. Pull/push authorization still comes from IAM.
           pattern: '[a-z0-9]+(?:[._/-][a-z0-9]+)*'
         - name: TAG_KEY
           example: Project
@@ -1863,6 +1894,17 @@
             Properties:
               RepositoryName:
                 Ref: Name
+              RepositoryPolicyText:
+                Version: '2012-10-17'
+                Statement:
+                  - Sid: RequireTLS
+                    Effect: Deny
+                    Principal: '*'
+                    Action: ecr:*
+                    Condition:
+                      Bool:
+                        aws:SecureTransport: 'false'
+                        aws:PrincipalIsAWSService: 'false'
               ImageTagMutability: IMMUTABLE
               ImageScanningConfiguration:
                 ScanOnPush: true
@@ -2629,7 +2671,7 @@
           example: my-stream
           required: true
           type: string
-          hint: ''
+          hint: One provisioned shard, matching the 2024 marking scheme; encrypted, with 72-hour retention.
           pattern: '[A-Za-z0-9][A-Za-z0-9_.-]{0,63}'
         - name: TAG_KEY
           example: Project
@@ -2658,7 +2700,8 @@
               Name:
                 Ref: Name
               StreamModeDetails:
-                StreamMode: ON_DEMAND
+                StreamMode: PROVISIONED
+              ShardCount: 1
               RetentionPeriodHours: 72
               StreamEncryption:
                 EncryptionType: KMS
@@ -2759,6 +2802,7 @@
       templateName: security
       template:
         AWSTemplateFormatVersion: 2010-09-09
+        Description: GuardDuty, KMS-encrypted S3 findings export and account external-access analyzer. Import existing resources before deploying with CloudFormation; AWS CLI reuses existing enablement and healthy exports.
         Parameters:
           Name:
             Type: String
@@ -2794,6 +2838,167 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
+          FindingsKey:
+            Type: AWS::KMS::Key
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: GuardDuty findings export
+              EnableKeyRotation: true
+              KeyPolicy:
+                Version: 2012-10-17
+                Statement:
+                  - Sid: AccountAdministration
+                    Effect: Allow
+                    Principal:
+                      AWS:
+                        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+                    Action: kms:*
+                    Resource: '*'
+                  - Sid: GuardDutyExport
+                    Effect: Allow
+                    Principal:
+                      Service:
+                        - Fn::Sub: guardduty.${AWS::URLSuffix}
+                        - Fn::Sub: guardduty.${AWS::Region}.${AWS::URLSuffix}
+                    Action: kms:GenerateDataKey
+                    Resource: '*'
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Ref: AWS::AccountId
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:guardduty:${AWS::Region}:${AWS::AccountId}:detector/${Detector}
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          FindingsBucket:
+            Type: AWS::S3::Bucket
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              BucketName:
+                Fn::Sub: guardduty-findings-${AWS::AccountId}-${AWS::Region}
+              PublicAccessBlockConfiguration:
+                BlockPublicAcls: true
+                IgnorePublicAcls: true
+                BlockPublicPolicy: true
+                RestrictPublicBuckets: true
+              OwnershipControls:
+                Rules:
+                  - ObjectOwnership: BucketOwnerEnforced
+              VersioningConfiguration:
+                Status: Enabled
+              BucketEncryption:
+                ServerSideEncryptionConfiguration:
+                  - ServerSideEncryptionByDefault:
+                      SSEAlgorithm: aws:kms
+                      KMSMasterKeyID:
+                        Fn::GetAtt: [FindingsKey, Arn]
+              LifecycleConfiguration:
+                Rules:
+                  - Id: FindingsRetention
+                    Status: Enabled
+                    ExpirationInDays: 365
+                    NoncurrentVersionExpiration:
+                      NoncurrentDays: 30
+                    AbortIncompleteMultipartUpload:
+                      DaysAfterInitiation: 1
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          FindingsBucketPolicy:
+            Type: AWS::S3::BucketPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Bucket:
+                Ref: FindingsBucket
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Sid: GuardDutyBucketLocation
+                    Effect: Allow
+                    Principal:
+                      Service:
+                        - Fn::Sub: guardduty.${AWS::URLSuffix}
+                        - Fn::Sub: guardduty.${AWS::Region}.${AWS::URLSuffix}
+                    Action: s3:GetBucketLocation
+                    Resource:
+                      Fn::GetAtt: [FindingsBucket, Arn]
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Ref: AWS::AccountId
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:guardduty:${AWS::Region}:${AWS::AccountId}:detector/${Detector}
+                  - Sid: GuardDutyWrite
+                    Effect: Allow
+                    Principal:
+                      Service:
+                        - Fn::Sub: guardduty.${AWS::URLSuffix}
+                        - Fn::Sub: guardduty.${AWS::Region}.${AWS::URLSuffix}
+                    Action: s3:PutObject
+                    Resource:
+                      Fn::Sub: ${FindingsBucket.Arn}/*
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Ref: AWS::AccountId
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:guardduty:${AWS::Region}:${AWS::AccountId}:detector/${Detector}
+                  - Sid: RequireTLS
+                    Effect: Deny
+                    Principal: '*'
+                    Action: s3:*
+                    Resource:
+                      - Fn::GetAtt: [FindingsBucket, Arn]
+                      - Fn::Sub: ${FindingsBucket.Arn}/*
+                    Condition:
+                      Bool:
+                        aws:SecureTransport: 'false'
+                  - Sid: RequireKMS
+                    Effect: Deny
+                    Principal: '*'
+                    Action: s3:PutObject
+                    Resource:
+                      Fn::Sub: ${FindingsBucket.Arn}/*
+                    Condition:
+                      StringNotEquals:
+                        s3:x-amz-server-side-encryption: aws:kms
+                  - Sid: RequireFindingsKey
+                    Effect: Deny
+                    Principal: '*'
+                    Action: s3:PutObject
+                    Resource:
+                      Fn::Sub: ${FindingsBucket.Arn}/*
+                    Condition:
+                      StringNotEquals:
+                        s3:x-amz-server-side-encryption-aws-kms-key-id:
+                          Fn::GetAtt: [FindingsKey, Arn]
+          GuardDutyFindingExport:
+            Type: AWS::GuardDuty::PublishingDestination
+            DependsOn: FindingsBucketPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              DetectorId:
+                Ref: Detector
+              DestinationType: S3
+              DestinationProperties:
+                DestinationArn:
+                  Fn::GetAtt: [FindingsBucket, Arn]
+                KmsKeyArn:
+                  Fn::GetAtt: [FindingsKey, Arn]
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
         Outputs:
           DetectorId:
             Value:
@@ -2803,6 +3008,12 @@
               Fn::GetAtt:
                 - Analyzer
                 - Arn
+          FindingsBucket:
+            Value:
+              Ref: FindingsBucket
+          FindingsKeyArn:
+            Value:
+              Fn::GetAtt: [FindingsKey, Arn]
       cli: security
     - id: service-iot-audit
       title: IoT Device Defender Audit
@@ -2878,7 +3089,7 @@
                           Ref: AWS::AccountId
                       ArnLike:
                         aws:SourceArn:
-                          Fn::Sub: 'arn:${AWS::Partition}:iot:${AWS::Region}:${AWS::AccountId}::'
+                          Fn::Sub: 'arn:${AWS::Partition}:iot:${AWS::Region}:${AWS::AccountId}:*'
               ManagedPolicyArns:
                 - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AWSIoTDeviceDefenderAudit
               Tags:
@@ -2902,7 +3113,7 @@
                           Ref: AWS::AccountId
                       ArnLike:
                         aws:SourceArn:
-                          Fn::Sub: 'arn:${AWS::Partition}:iot:${AWS::Region}:${AWS::AccountId}::'
+                          Fn::Sub: 'arn:${AWS::Partition}:iot:${AWS::Region}:${AWS::AccountId}:*'
               Policies:
                 - PolicyName: ServiceAccess
                   PolicyDocument:
@@ -3129,6 +3340,14 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
+              LifecycleConfiguration:
+                Rules:
+                  - Id: Cleanup
+                    Status: Enabled
+                    AbortIncompleteMultipartUpload:
+                      DaysAfterInitiation: 1
+                    NoncurrentVersionExpiration:
+                      NoncurrentDays: 90
           TLS:
             Type: AWS::S3::BucketPolicy
             Properties:
@@ -3372,6 +3591,14 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
+              LifecycleConfiguration:
+                Rules:
+                  - Id: Cleanup
+                    Status: Enabled
+                    AbortIncompleteMultipartUpload:
+                      DaysAfterInitiation: 1
+                    NoncurrentVersionExpiration:
+                      NoncurrentDays: 90
           TLS:
             Type: AWS::S3::BucketPolicy
             Properties:

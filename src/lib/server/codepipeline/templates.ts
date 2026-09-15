@@ -71,6 +71,16 @@ const bucket = (extra: object = {}) =>
       },
       OwnershipControls: { Rules: [{ ObjectOwnership: 'BucketOwnerEnforced' }] },
       VersioningConfiguration: { Status: 'Enabled' },
+      LifecycleConfiguration: {
+        Rules: [
+          {
+            Id: 'Cleanup',
+            Status: 'Enabled',
+            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 },
+            NoncurrentVersionExpiration: { NoncurrentDays: 90 },
+          },
+        ],
+      },
       Tags: tags,
       ...extra,
     },
@@ -1159,7 +1169,7 @@ function cloudformation() {
   addInput(
     p,
     'WorkloadActions',
-    's3:CreateBucket,s3:DeleteBucket,s3:Get*,s3:ListBucket,s3:PutBucketTagging,s3:PutBucketPublicAccessBlock,s3:PutEncryptionConfiguration,s3:PutBucketVersioning,s3:PutBucketOwnershipControls',
+    's3:CreateBucket,s3:DeleteBucket,s3:Get*,s3:ListBucket,s3:PutBucketTagging,s3:PutBucketPublicAccessBlock,s3:PutEncryptionConfiguration,s3:PutBucketVersioning,s3:PutBucketOwnershipControls,s3:PutLifecycleConfiguration',
     { Type: 'CommaDelimitedList' },
   );
   addInput(p, 'WorkloadResources', 'arn:aws:s3:::my-workload-111122223333-eu-central-1', {

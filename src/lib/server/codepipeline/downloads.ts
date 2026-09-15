@@ -1,6 +1,7 @@
 import { pipelines, type PipelinePreset, type SourceProvider } from './presets';
 import { cloudFormationYaml } from '$lib/server/powertools/cloudformation';
 import type { EnvVariable } from '$lib/powertools/types';
+import { globalWafTemplate } from '$lib/server/powertools/security';
 
 const root = 'https://megakuul.ch/worldskills/codepipeline/files/';
 export const inputs: EnvVariable[] = [
@@ -15,7 +16,15 @@ export const inputs: EnvVariable[] = [
 ];
 export function deployCommand(p: PipelinePreset, provider: SourceProvider) {
   const file = `${p.id}-${provider.toLowerCase()}.yaml`;
-  return `: "\${NAME:?Set NAME}" "\${TAG_KEY:?Set TAG_KEY}" "\${TAG_VALUE:?Set TAG_VALUE}" && [[ "$NAME" =~ ^[a-z][a-z0-9-]{0,19}$ ]] && curl -fsSL ${root}${file} -o ${file} && aws cloudformation deploy --stack-name "cp-$NAME" --template-file ${file} --parameter-overrides "TagKey=$TAG_KEY" "TagValue=$TAG_VALUE" --tags "$TAG_KEY=$TAG_VALUE" --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset`;
+  const web = ['ec2', 'ecs', 'ecs-bluegreen'].includes(p.id);
+  const edge = ['s3', 'ec2'].includes(p.id);
+  const edgeDeploy = edge
+    ? `curl -fsSL ${root}edge-waf.yaml -o edge-waf.yaml && aws cloudformation deploy --region us-east-1 --stack-name "cp-$NAME-edge" --template-file edge-waf.yaml --parameter-overrides "TagKey=$TAG_KEY" "TagValue=$TAG_VALUE" --tags "$TAG_KEY=$TAG_VALUE" --no-fail-on-empty-changeset && EDGE_WAF=$(aws cloudformation describe-stacks --region us-east-1 --stack-name "cp-$NAME-edge" --query 'Stacks[0].Outputs[?OutputKey==\`WebACLArn\`].OutputValue | [0]' --output text) && [[ "$EDGE_WAF" == arn:aws:wafv2:us-east-1:*:global/webacl/* ]] && `
+    : '';
+  const discover = web
+    ? `CF_PREFIX=$(aws ec2 describe-managed-prefix-lists --filters Name=prefix-list-name,Values=com.amazonaws.global.cloudfront.origin-facing --query 'PrefixLists[0].PrefixListId' --output text) && [[ "$CF_PREFIX" == pl-* ]] && CF_AZS=$(aws ec2 describe-availability-zones --filters Name=zone-type,Values=availability-zone Name=state,Values=available --query "join(',', AvailabilityZones[?ZoneId!='use1-az3' && ZoneId!='usw1-az2' && ZoneId!='apne1-az3' && ZoneId!='cac1-az3'].ZoneName | [:2])" --output text) && [[ "$CF_AZS" == *,* ]] && `
+    : '';
+  return `: "\${NAME:?Set NAME}" "\${TAG_KEY:?Set TAG_KEY}" "\${TAG_VALUE:?Set TAG_VALUE}" && [[ "$NAME" =~ ^[a-z][a-z0-9-]{0,19}$ ]] && ${discover}${edgeDeploy}curl -fsSL ${root}${file} -o ${file} && aws cloudformation deploy --stack-name "cp-$NAME" --template-file ${file} --parameter-overrides "TagKey=$TAG_KEY" "TagValue=$TAG_VALUE"${web ? ' "CloudFrontPrefixList=$CF_PREFIX" "CloudFrontAzs=$CF_AZS"' : ''}${edge ? ' "EdgeWebACL=$EDGE_WAF"' : ''} --tags "$TAG_KEY=$TAG_VALUE" --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset`;
 }
 export function sourceCommand(p: PipelinePreset, provider: SourceProvider) {
   const file = `${p.id}-${provider.toLowerCase()}-source.sh`;
@@ -120,15 +129,22 @@ export function sourceZip(files: Record<string, string>): Uint8Array<ArrayBuffer
   return bytes;
 }
 export function downloads() {
-  return pipelines.flatMap(p => [
-    ...p.variants.flatMap(v => [
-      { name: v.file, type: 'application/yaml', body: cloudFormationYaml(v.template) },
-      {
-        name: `${p.id}-${v.provider.toLowerCase()}-source.sh`,
-        type: 'text/x-shellscript',
-        body: sourceScript(p, v.provider),
-      },
+  return [
+    {
+      name: 'edge-waf.yaml',
+      type: 'application/yaml',
+      body: cloudFormationYaml(globalWafTemplate()),
+    },
+    ...pipelines.flatMap(p => [
+      ...p.variants.flatMap(v => [
+        { name: v.file, type: 'application/yaml', body: cloudFormationYaml(v.template) },
+        {
+          name: `${p.id}-${v.provider.toLowerCase()}-source.sh`,
+          type: 'text/x-shellscript',
+          body: sourceScript(p, v.provider),
+        },
+      ]),
+      { name: `${p.id}-source.zip`, type: 'application/zip', body: sourceZip(p.source) },
     ]),
-    { name: `${p.id}-source.zip`, type: 'application/zip', body: sourceZip(p.source) },
-  ]);
+  ];
 }

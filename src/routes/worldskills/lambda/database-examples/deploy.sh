@@ -1,6 +1,8 @@
 # Function ZIP · Node.js 22 / 24 · x86_64 / arm64 · handler index.handler
 curl -fLO https://megakuul.ch/downloads/nodejs-databases-function.zip
-aws lambda create-function --function-name db-demo --runtime nodejs24.x --architectures arm64 --handler index.handler --role arn:aws:iam::111122223333:role/lambda-execution --zip-file fileb://nodejs-databases-function.zip --timeout 30 --memory-size 512
+aws logs create-log-group --log-group-name /aws/lambda/db-demo --deletion-protection-enabled --tags Project=worldskills
+aws logs put-retention-policy --log-group-name /aws/lambda/db-demo --retention-in-days 30
+aws lambda create-function --function-name db-demo --runtime nodejs24.x --architectures arm64 --handler index.handler --role arn:aws:iam::111122223333:role/lambda-execution --zip-file fileb://nodejs-databases-function.zip --timeout 30 --memory-size 512 --tags Project=worldskills
 aws lambda wait function-active-v2 --function-name db-demo
 aws lambda invoke --function-name db-demo --cli-binary-format raw-in-base64-out --payload '{}' drivers.json
 

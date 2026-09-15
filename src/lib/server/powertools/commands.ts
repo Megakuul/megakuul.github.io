@@ -228,6 +228,9 @@ function compiler(template: CloudFormationTemplate) {
       return '(' + v['Fn::Equals'].map((x: any) => '(' + c(x) + ')').join(' == ') + ')';
     if (v['Fn::Not']) return '(' + c(v['Fn::Not'][0]) + ' | not)';
     if (v['Fn::Join']) return '(' + c(v['Fn::Join'][1]) + ' | join(' + c(v['Fn::Join'][0]) + '))';
+    if (v['Fn::Split'])
+      return '(' + c(v['Fn::Split'][1]) + ' | split(' + c(v['Fn::Split'][0]) + '))';
+    if (v['Fn::Select']) return '(' + c(v['Fn::Select'][1]) + ')[' + c(v['Fn::Select'][0]) + ']';
     const entries = Object.entries(v as Record<string, any>).filter(
       ([, x]) => x !== undefined && x !== null,
     );
@@ -249,7 +252,7 @@ const cfnTagExceptions: Record<string, string> = {
   'AWS::IAM::InstanceProfile': 'instance profile',
   'AWS::Config::ConfigurationRecorder': 'Config recorder',
 };
-function cfnTagNote(template: CloudFormationTemplate) {
+function cfnTagNote(template: CloudFormationTemplate, hasCli = true) {
   const untagged = [
     ...new Set(
       Object.values(template.Resources)
@@ -258,7 +261,7 @@ function cfnTagNote(template: CloudFormationTemplate) {
     ),
   ];
   return untagged.length
-    ? `CloudFormation cannot tag: ${untagged.join(', ')}. AWS CLI includes those tags.`
+    ? `CloudFormation cannot tag: ${untagged.join(', ')}.${hasCli ? ' AWS CLI includes those tags.' : ''}`
     : null;
 }
 /** Keep the template as the default and direct API calls as the fallback. */
@@ -266,9 +269,12 @@ export function creationCommands(
   resourceTemplate: CloudFormationTemplate,
   kind: string,
   inputs: string[] = ['NAME'],
-  cliOverride?: string,
+  cliOverride?: string | false,
 ) {
-  const cli = cliOverride ?? directCommand(resourceTemplate, kind, inputs);
+  const cli =
+    cliOverride === false
+      ? undefined
+      : (cliOverride ?? directCommand(resourceTemplate, kind, inputs));
   const optionalPolicies = Object.entries(resourceTemplate.Resources)
     .filter(
       ([, resource]) =>
@@ -288,7 +294,7 @@ export function creationCommands(
       command: cfnCommand(document, kind, inputs, file),
       templateFile: file,
       document,
-      cfnTagNote: cfnTagNote(document),
+      cfnTagNote: cfnTagNote(document, !!cli),
     };
   }
   return {
@@ -299,7 +305,7 @@ export function creationCommands(
     document: resourceTemplate,
     templateFile: templateFile(kind),
     documentTitle: 'CloudFormation YAML',
-    cfnTagNote: cfnTagNote(resourceTemplate),
+    cfnTagNote: cfnTagNote(resourceTemplate, !!cli),
   };
 }
 /** A normal CLI invocation: download the matching YAML, then submit the stack. */
@@ -339,7 +345,7 @@ function cfnCommand(
     capabilities.push('CAPABILITY_NAMED_IAM');
   if (template.Transform) capabilities.push('CAPABILITY_AUTO_EXPAND');
   const deploy = [
-    `aws cloudformation create-stack --stack-name "${stackName(kind, inputs)}"`,
+    `aws cloudformation create-stack${kind === 'cloudfront' ? ' --region us-east-1' : ''} --stack-name "${stackName(kind, inputs)}"`,
     `--template-body file://${file}`,
     parameters.length ? '--parameters ' + parameters.join(' ') : '',
     '--tags "Key=${TAG_KEY:?Set TAG_KEY},Value=${TAG_VALUE:?Set TAG_VALUE}"',
@@ -350,7 +356,7 @@ function cfnCommand(
   return `curl -fsSL https://megakuul.github.io/worldskills/powertools/templates/${file} -o ${file} && ${deploy}`;
 }
 /** Build explicit AWS API calls; jq only serializes request JSON. */
-function cliSteps(template: CloudFormationTemplate) {
+function cliSteps(template: CloudFormationTemplate, skip: string[] = []) {
   const e = compiler(template),
     steps = [];
   const apiBootstrap = Object.values(template.Resources).some(r =>
@@ -369,11 +375,12 @@ function cliSteps(template: CloudFormationTemplate) {
     steps.push(id === 'response' ? command : `result=$(${command})`);
   };
   const output = (id: string, field: string, key = 'R') =>
-    steps.push(`export ${key}_${id}=$(jq -er ${quote(field)} <<<"$result")`);
+    steps.push(`${key}_${id}=$(jq -er ${quote(field)} <<<"$result")`, `export ${key}_${id}`);
   const j = (value: any) => expr('(' + e.c(value) + ' | tojson)');
   const tagmap = (value: any) =>
     expr('(' + e.c(value ?? tags) + ' | map({key:.Key,value:.Value}) | from_entries)');
   for (const [id, r] of Object.entries(template.Resources)) {
+    if (skip.includes(id)) continue;
     const p = r.Properties ?? {},
       n = expr(e.name(id)),
       a = expr(e.arn(id)),
@@ -553,7 +560,11 @@ function cliSteps(template: CloudFormationTemplate) {
             attrs[k] =
               typeof v === 'string'
                 ? v
-                : expr('(' + e.c(v) + ' | if type=="string" then . else tojson end)');
+                : expr(
+                    '(' +
+                      e.c(v) +
+                      ' | if . == null then null elif type=="string" then . else tojson end)',
+                  );
         request('sqs', 'create-queue', { QueueName: n, Attributes: attrs, tags: tagmap(t) }, id);
         output(id, '.QueueUrl');
         steps.push('sleep 1');
@@ -853,6 +864,11 @@ function cliSteps(template: CloudFormationTemplate) {
             TableName: n,
             PointInTimeRecoverySpecification: p.PointInTimeRecoverySpecification,
           });
+        if (p.TimeToLiveSpecification)
+          request('dynamodb', 'update-time-to-live', {
+            TableName: n,
+            TimeToLiveSpecification: p.TimeToLiveSpecification,
+          });
         break;
       case 'AWS::ECR::Repository':
         request('ecr', 'create-repository', {
@@ -866,6 +882,11 @@ function cliSteps(template: CloudFormationTemplate) {
           repositoryName: n,
           lifecyclePolicyText: p.LifecyclePolicy.LifecyclePolicyText,
         });
+        if (p.RepositoryPolicyText)
+          request('ecr', 'set-repository-policy', {
+            repositoryName: n,
+            policyText: j(p.RepositoryPolicyText),
+          });
         break;
       case 'AWS::EKS::PodIdentityAssociation':
         request('eks', 'create-pod-identity-association', {
@@ -969,7 +990,8 @@ function cliSteps(template: CloudFormationTemplate) {
       case 'AWS::Kinesis::Stream':
         request('kinesis', 'create-stream', {
           StreamName: n,
-          StreamModeDetails: { StreamMode: 'ON_DEMAND' },
+          StreamModeDetails: p.StreamModeDetails,
+          ShardCount: p.ShardCount,
           Tags: tagmap(t),
         });
         steps.push(`aws kinesis wait stream-exists --stream-name "$(jq -nr ${quote(e.name(id))})"`);
@@ -999,6 +1021,20 @@ function cliSteps(template: CloudFormationTemplate) {
           id,
         );
         output(id, '.DetectorId');
+        break;
+      case 'AWS::GuardDuty::PublishingDestination':
+        request(
+          'guardduty',
+          'create-publishing-destination',
+          {
+            DetectorId: p.DetectorId,
+            DestinationType: p.DestinationType,
+            DestinationProperties: p.DestinationProperties,
+            Tags: tagmap(t),
+          },
+          id,
+        );
+        output(id, '.DestinationId');
         break;
       case 'AWS::AccessAnalyzer::Analyzer':
         request(
@@ -1133,7 +1169,7 @@ function directCommand(
   );
 }
 
-export function securityCommand() {
+export function securityCommand(template: CloudFormationTemplate) {
   return shell(
     [
       ...identity(),
@@ -1144,7 +1180,11 @@ export function securityCommand() {
       'analyzer=$(jq -r \'.analyzers[] | select(.type=="ACCOUNT") | .arn\' <<<"$analyzers")',
       `if [ "$detector" = None ]; then detector=$(aws guardduty create-detector --enable --finding-publishing-frequency FIFTEEN_MINUTES --tags "$tags" --query DetectorId --output text); else aws guardduty update-detector --detector-id "$detector" --enable --finding-publishing-frequency FIFTEEN_MINUTES && aws guardduty tag-resource --resource-arn "arn:$PARTITION:guardduty:$REGION:$ACCOUNT_ID:detector/$detector" --tags "$tags"; fi`,
       `if [ -n "$analyzer" ]; then aws accessanalyzer tag-resource --resource-arn "$analyzer" --tags "$tags"; else analyzer=$(aws accessanalyzer create-analyzer --analyzer-name "$NAME" --type ACCOUNT --tags "$tags" --query arn --output text); fi`,
-      `printf 'Detector: %s\\nAnalyzer: %s\\n' "$detector" "$analyzer"`,
+      'export R_Detector="$detector"',
+      'destination=$(aws guardduty list-publishing-destinations --detector-id "$detector" --query "Destinations[?DestinationType==\'S3\'].DestinationId | [0]" --output text)',
+      `if [ "$destination" = None ]; then ${cliSteps(template, ['Detector', 'Analyzer']).join(' && ')} && destination="$R_GuardDutyFindingExport"; fi`,
+      '( for attempt in {1..12}; do export_status=$(aws guardduty describe-publishing-destination --detector-id "$detector" --destination-id "$destination" --query Status --output text) || exit $?; case "$export_status" in PUBLISHING) exit 0 ;; PENDING_VERIFICATION) sleep 5 ;; *) printf "GuardDuty export is %s; check its bucket and KMS policies.\\n" "$export_status" >&2; exit 1 ;; esac; done; printf "GuardDuty export is still pending verification.\\n" >&2; exit 1 )',
+      `printf 'Detector: %s\\nAnalyzer: %s\\nFindings export: %s\\n' "$detector" "$analyzer" "$destination"`,
     ],
     ['NAME'],
   );

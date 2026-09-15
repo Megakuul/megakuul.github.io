@@ -23,7 +23,7 @@ export interface ToolDefinition {
   template?: CloudFormationTemplate;
   policy?: Record<string, unknown>;
   command?: string;
-  cli?: 'security';
+  cli?: 'security' | false;
 }
 
 export interface DefinitionGroup {

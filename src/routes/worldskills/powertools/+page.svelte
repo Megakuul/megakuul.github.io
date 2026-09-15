@@ -93,7 +93,7 @@
                   >
                 </div>
               </div>
-              {#if snippet.cliCommand}
+              {#if snippet.cliCommand || snippet.serviceOnly}
                 <div
                   class="flex flex-wrap gap-2 border-b border-white/5 px-4 py-2"
                   role="group"
@@ -112,11 +112,11 @@
                       >CloudFormation · service only</button
                     >
                   {/if}
-                  <button
-                    class="copy-button"
-                    aria-pressed={mode === 'cli'}
-                    onclick={() => (commandModes[snippet.id] = 'cli')}>AWS CLI</button
-                  >
+                  {#if snippet.cliCommand}<button
+                      class="copy-button"
+                      aria-pressed={mode === 'cli'}
+                      onclick={() => (commandModes[snippet.id] = 'cli')}>AWS CLI</button
+                    >{/if}
                 </div>
               {/if}
               {#if mode === 'serviceOnly'}

@@ -1,5 +1,6 @@
 import { pipelineRecipes, type PipelineTemplate } from './templates';
 import type { CloudFormationTemplate } from '$lib/powertools/types';
+import { regionalWaf } from '$lib/server/powertools/security';
 
 const ref = (Ref: string) => ({ Ref });
 const sub = (value: string) => ({ 'Fn::Sub': value });
@@ -34,6 +35,11 @@ export interface PipelinePreset {
 
 function network(template: CloudFormationTemplate) {
   const r = template.Resources;
+  template.Parameters.CloudFrontAzs = {
+    Type: 'CommaDelimitedList',
+    Description:
+      'Two available standard AZs supporting VPC origins; discovered by the deploy command.',
+  };
   r.Vpc = resource('AWS::EC2::VPC', {
     CidrBlock: '10.42.0.0/16',
     EnableDnsSupport: true,
@@ -60,7 +66,7 @@ function network(template: CloudFormationTemplate) {
     r[id] = resource('AWS::EC2::Subnet', {
       VpcId: ref('Vpc'),
       CidrBlock: `10.42.${index}.0/24`,
-      AvailabilityZone: { 'Fn::Select': [index, { 'Fn::GetAZs': '' }] },
+      AvailabilityZone: { 'Fn::Select': [index, ref('CloudFrontAzs')] },
       MapPublicIpOnLaunch: false,
       Tags: tags,
     });
@@ -68,6 +74,87 @@ function network(template: CloudFormationTemplate) {
       SubnetId: ref(id),
       RouteTableId: ref('PublicRoutes'),
     });
+    const privateId = `PrivateSubnet${index + 1}`;
+    r[privateId] = resource('AWS::EC2::Subnet', {
+      VpcId: ref('Vpc'),
+      CidrBlock: `10.42.${index + 10}.0/24`,
+      AvailabilityZone: { 'Fn::Select': [index, ref('CloudFrontAzs')] },
+      MapPublicIpOnLaunch: false,
+      Tags: tags,
+    });
+    r[`${privateId}Routes`] = resource('AWS::EC2::SubnetRouteTableAssociation', {
+      SubnetId: ref(privateId),
+      RouteTableId: ref('PrivateRoutes'),
+    });
+  }
+  r.NatAddress = resource('AWS::EC2::EIP', { Domain: 'vpc', Tags: tags });
+  r.Nat = resource(
+    'AWS::EC2::NatGateway',
+    {
+      AllocationId: att('NatAddress', 'AllocationId'),
+      SubnetId: ref('Subnet1'),
+      Tags: tags,
+    },
+    { DependsOn: ['InternetRoute', 'Subnet1Routes'] },
+  );
+  r.PrivateRoutes = resource('AWS::EC2::RouteTable', { VpcId: ref('Vpc'), Tags: tags });
+  r.NatRoute = resource('AWS::EC2::Route', {
+    RouteTableId: ref('PrivateRoutes'),
+    DestinationCidrBlock: '0.0.0.0/0',
+    NatGatewayId: ref('Nat'),
+  });
+  for (const service of ['s3', 'dynamodb'])
+    r[`${service}Endpoint`] = resource('AWS::EC2::VPCEndpoint', {
+      VpcId: ref('Vpc'),
+      VpcEndpointType: 'Gateway',
+      ServiceName: sub('com.amazonaws.${AWS::Region}.' + service),
+      RouteTableIds: [ref('PrivateRoutes')],
+      Tags: tags,
+    });
+  if (r.TaskGroup) {
+    r.EndpointGroup = resource('AWS::EC2::SecurityGroup', {
+      VpcId: ref('Vpc'),
+      GroupDescription: 'Private ECR HTTPS from application tasks only',
+      SecurityGroupIngress: [
+        { IpProtocol: 'tcp', FromPort: 443, ToPort: 443, SourceSecurityGroupId: ref('TaskGroup') },
+      ],
+      SecurityGroupEgress: [
+        {
+          IpProtocol: 'tcp',
+          FromPort: 443,
+          ToPort: 443,
+          DestinationSecurityGroupId: ref('TaskGroup'),
+        },
+      ],
+      Tags: tags,
+    });
+    for (const [id, service] of [
+      ['EcrApiEndpoint', 'ecr.api'],
+      ['EcrDockerEndpoint', 'ecr.dkr'],
+    ])
+      r[id] = resource('AWS::EC2::VPCEndpoint', {
+        VpcId: ref('Vpc'),
+        VpcEndpointType: 'Interface',
+        ServiceName: sub('com.amazonaws.${AWS::Region}.' + service),
+        PrivateDnsEnabled: true,
+        SubnetIds: [ref('PrivateSubnet1'), ref('PrivateSubnet2')],
+        SecurityGroupIds: [ref('EndpointGroup')],
+        PolicyDocument: policy(
+          { ...allow('ecr:GetAuthorizationToken', '*'), Principal: '*' },
+          {
+            ...allow(
+              [
+                'ecr:BatchGetImage',
+                'ecr:GetDownloadUrlForLayer',
+                'ecr:BatchCheckLayerAvailability',
+              ],
+              att('Images'),
+            ),
+            Principal: '*',
+          },
+        ),
+        Tags: tags,
+      });
   }
   r.FlowLogs = logGroup('vpc');
   r.FlowLogsRole = resource('AWS::IAM::Role', {
@@ -109,6 +196,92 @@ function network(template: CloudFormationTemplate) {
     Tags: tags,
   });
   template.Outputs!.VpcId = { Value: ref('Vpc') };
+}
+
+/** HTTPS at CloudFront; application origins only receive traffic through private VPC origins. */
+function privateWeb(template: CloudFormationTemplate) {
+  const r = template.Resources;
+  template.Parameters.CloudFrontPrefixList = {
+    Type: 'String',
+    AllowedPattern: 'pl-[0-9a-f]+',
+    Description:
+      'Discovered automatically by the deploy command: com.amazonaws.global.cloudfront.origin-facing.',
+  };
+  const group = r.AlbGroup ?? r.InstanceGroup;
+  group.Properties!.GroupDescription =
+    'Only CloudFront origin-facing traffic; no public CIDR or SSH ingress';
+  group.Properties!.SecurityGroupIngress = [
+    {
+      IpProtocol: 'tcp',
+      FromPort: 80,
+      ToPort: 80,
+      SourcePrefixListId: ref('CloudFrontPrefixList'),
+    },
+  ];
+  if (r.Instance) {
+    r.Instance.Properties!.NetworkInterfaces[0].AssociatePublicIpAddress = false;
+    r.Instance.Properties!.NetworkInterfaces[0].SubnetId = ref('PrivateSubnet1');
+  } else {
+    r.LoadBalancer.Properties!.Scheme = 'internal';
+    r.LoadBalancer.Properties!.Subnets = [ref('PrivateSubnet1'), ref('PrivateSubnet2')];
+    r.Service.Properties!.NetworkConfiguration.AwsvpcConfiguration = {
+      AssignPublicIp: 'DISABLED',
+      Subnets: [ref('PrivateSubnet1'), ref('PrivateSubnet2')],
+      SecurityGroups: [ref('TaskGroup')],
+    };
+  }
+  r.VpcOrigin = resource(
+    'AWS::CloudFront::VpcOrigin',
+    {
+      VpcOriginEndpointConfig: {
+        Name: sub('${AWS::StackName}-origin'),
+        Arn: r.Instance
+          ? sub('arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${Instance}')
+          : ref('LoadBalancer'),
+        HTTPPort: 80,
+        HTTPSPort: 443,
+        OriginProtocolPolicy: 'http-only',
+        OriginSSLProtocols: ['TLSv1.2'],
+      },
+      Tags: tags,
+    },
+    {
+      DependsOn: r.Instance ? ['GatewayAttachment'] : ['Listener', 'GatewayAttachment'],
+    },
+  );
+  r.Distribution = resource('AWS::CloudFront::Distribution', {
+    Tags: tags,
+    DistributionConfig: {
+      Enabled: true,
+      HttpVersion: 'http2and3',
+      IPV6Enabled: true,
+      PriceClass: 'PriceClass_100',
+      Origins: [
+        {
+          Id: 'application',
+          DomainName: r.Instance
+            ? att('Instance', 'PrivateDnsName')
+            : att('LoadBalancer', 'DNSName'),
+          VpcOriginConfig: {
+            VpcOriginId: att('VpcOrigin', 'Id'),
+            OriginKeepaliveTimeout: 5,
+            OriginReadTimeout: 30,
+          },
+        },
+      ],
+      DefaultCacheBehavior: {
+        TargetOriginId: 'application',
+        ViewerProtocolPolicy: 'redirect-to-https',
+        Compress: true,
+        AllowedMethods: ['GET', 'HEAD', 'OPTIONS', 'PUT', 'PATCH', 'POST', 'DELETE'],
+        CachedMethods: ['GET', 'HEAD'],
+        CachePolicyId: '4135ea2d-6df8-44a3-9df3-4b5a84be39ad',
+        OriginRequestPolicyId: 'b689b0a8-53d0-40ab-baf2-68738e2966ac',
+      },
+      ViewerCertificate: { CloudFrontDefaultCertificate: true },
+    },
+  });
+  template.Outputs!.ApplicationUrl = { Value: sub('https://${Distribution.DomainName}') };
 }
 
 /** Materialize each preset so its downloaded template has no configuration switches. */
@@ -179,13 +352,19 @@ function fixed(recipe: PipelineTemplate, provider: SourceProvider): CloudFormati
   const r = template.Resources;
   if (recipe.template.Parameters.VpcId) {
     network(template);
+    privateWeb(template);
     const target = r.Instance ?? r.Service;
     const dependencies = target.DependsOn
       ? Array.isArray(target.DependsOn)
         ? target.DependsOn
         : [target.DependsOn]
       : [];
-    target.DependsOn = [...dependencies, 'InternetRoute', 'Subnet1Routes', 'Subnet2Routes'];
+    target.DependsOn = [
+      ...dependencies,
+      'NatRoute',
+      'PrivateSubnet1Routes',
+      'PrivateSubnet2Routes',
+    ];
   }
   harden(template, recipe.id);
   return template;
@@ -193,6 +372,64 @@ function fixed(recipe: PipelineTemplate, provider: SourceProvider): CloudFormati
 
 function harden(template: CloudFormationTemplate, id: string) {
   const r = template.Resources;
+  if (r.Distribution && !r.LoadBalancer) {
+    template.Parameters.EdgeWebACL = {
+      Type: 'String',
+      Description:
+        'CloudFront WAF ARN; the deploy command creates the global WAF stack automatically.',
+      AllowedPattern: 'arn:aws:wafv2:us-east-1:[0-9]{12}:global/webacl/.+',
+    };
+    r.Distribution.Properties!.DistributionConfig.WebACLId = ref('EdgeWebACL');
+  }
+  if (r.Images) {
+    r.Images.Properties!.LifecyclePolicy = {
+      LifecyclePolicyText: JSON.stringify({
+        rules: [
+          {
+            rulePriority: 1,
+            description: 'Expire untagged images after 30 days',
+            selection: {
+              tagStatus: 'untagged',
+              countType: 'sinceImagePushed',
+              countUnit: 'days',
+              countNumber: 30,
+            },
+            action: { type: 'expire' },
+          },
+        ],
+      }),
+    };
+    r.Images.Properties!.RepositoryPolicyText = policy({
+      Effect: 'Deny',
+      Principal: '*',
+      Action: 'ecr:*',
+      Condition: { Bool: { 'aws:SecureTransport': 'false', 'aws:PrincipalIsAWSService': 'false' } },
+    });
+  }
+  if (r.Service) {
+    regionalWaf(template, ref('LoadBalancer'));
+    r.ServiceScaling = resource('AWS::ApplicationAutoScaling::ScalableTarget', {
+      MinCapacity: 2,
+      MaxCapacity: 4,
+      ResourceId: sub('service/${Cluster}/${Service.Name}'),
+      ScalableDimension: 'ecs:service:DesiredCount',
+      ServiceNamespace: 'ecs',
+      RoleARN: sub(
+        'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService',
+      ),
+    });
+    r.ServiceCpuScaling = resource('AWS::ApplicationAutoScaling::ScalingPolicy', {
+      PolicyName: sub('${AWS::StackName}-cpu'),
+      PolicyType: 'TargetTrackingScaling',
+      ScalingTargetId: ref('ServiceScaling'),
+      TargetTrackingScalingPolicyConfiguration: {
+        TargetValue: 60,
+        PredefinedMetricSpecification: { PredefinedMetricType: 'ECSServiceAverageCPUUtilization' },
+        ScaleInCooldown: 300,
+        ScaleOutCooldown: 60,
+      },
+    });
+  }
   r.ArtifactKey = resource(
     'AWS::KMS::Key',
     {
@@ -455,12 +692,14 @@ function accessLogs(template: CloudFormationTemplate) {
           { ServerSideEncryptionByDefault: { SSEAlgorithm: 'AES256' } },
         ],
       },
+      VersioningConfiguration: { Status: 'Enabled' },
       LifecycleConfiguration: {
         Rules: [
           {
             Id: 'Logs',
             Status: 'Enabled',
             ExpirationInDays: 30,
+            NoncurrentVersionExpiration: { NoncurrentDays: 30 },
             AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 },
           },
         ],

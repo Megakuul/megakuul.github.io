@@ -24,7 +24,8 @@ export interface Group {
 const access: Group = {
   id: 'access',
   title: 'Cluster access',
-  blurb: 'Get kubectl talking to the cluster, then grant another IAM principal control-plane access.',
+  blurb:
+    'Get kubectl talking to the cluster, then grant another IAM principal control-plane access.',
   snippets: [
     {
       id: 'access-login',
@@ -33,6 +34,13 @@ const access: Group = {
       code: `aws eks update-kubeconfig --region eu-central-1 --name my-cluster --alias my-cluster
 kubectl config current-context
 kubectl get nodes`,
+    },
+    {
+      id: 'access-hardening',
+      title: 'EKS logging + endpoint',
+      note: 'Replace the example CIDR with your admin public IP /32. Keep private access enabled for nodes and VPC clients; disable public access only after verifying a private admin path.',
+      lang: 'bash',
+      code: `aws eks update-cluster-config --name my-cluster --logging '{"clusterLogging":[{"types":["api","audit","authenticator","controllerManager","scheduler"],"enabled":true}]}' --resources-vpc-config '{"endpointPrivateAccess":true,"endpointPublicAccess":true,"publicAccessCidrs":["198.51.100.10/32"]}'`,
     },
     {
       id: 'access-entry',
@@ -95,7 +103,8 @@ kubectl explain deployment.spec.template`,
 const workloads: Group = {
   id: 'workloads',
   title: 'Workloads',
-  blurb: 'Templates to get an app onto the cluster: a bare Pod, a Deployment, a StatefulSet, and how to expose them.',
+  blurb:
+    'Templates to get an app onto the cluster: a bare Pod, a Deployment, a StatefulSet, and how to expose them.',
   snippets: [
     {
       id: 'wl-pod',
@@ -221,7 +230,7 @@ spec:
     {
       id: 'wl-lb-service',
       title: 'Service (internet-facing NLB)',
-      note: 'Needs the AWS Load Balancer Controller installed. Swap scheme to internal for a private NLB.',
+      note: 'Needs the AWS Load Balancer Controller. Replace the client CIDR; restrict ingress even for an internet-facing load balancer.',
       code: `apiVersion: v1
 kind: Service
 metadata:
@@ -232,6 +241,7 @@ metadata:
     service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
 spec:
   type: LoadBalancer
+  loadBalancerSourceRanges: [198.51.100.10/32]
   selector: { app: my-app }
   ports:
     - port: 80
@@ -240,7 +250,7 @@ spec:
     {
       id: 'wl-ingress',
       title: 'Ingress (ALB)',
-      note: 'Also needs the AWS Load Balancer Controller. One ALB gets shared across every Ingress with the same group.name annotation.',
+      note: 'Replace the client CIDR, ACM certificate, WAF ARN and log bucket. The bucket must allow ELB log delivery; use the policy below. Certificate, WAF and bucket must be in the ALB region.',
       code: `apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -249,6 +259,13 @@ metadata:
     kubernetes.io/ingress.class: alb
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/inbound-cidrs: 198.51.100.10/32
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:eu-central-1:111122223333:certificate/12345678-1234-1234-1234-123456789abc
+    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+    alb.ingress.kubernetes.io/wafv2-acl-arn: arn:aws:wafv2:eu-central-1:111122223333:regional/webacl/app/12345678-1234-1234-1234-123456789abc
+    alb.ingress.kubernetes.io/load-balancer-attributes: access_logs.s3.enabled=true,access_logs.s3.bucket=my-alb-logs,access_logs.s3.prefix=alb,deletion_protection.enabled=true,routing.http.drop_invalid_header_fields.enabled=true
+    alb.ingress.kubernetes.io/tags: Project=worldskills
 spec:
   ingressClassName: alb
   rules:
@@ -262,13 +279,26 @@ spec:
                 name: my-app
                 port: { number: 80 }`,
     },
+    {
+      id: 'wl-alb-log-policy',
+      title: 'ALB log policy',
+      note: 'Add this statement to the log bucket policy. Match the bucket, account and prefix; use SSE-S3 encryption and enable lifecycle separately.',
+      lang: 'json',
+      code: `{
+  "Effect": "Allow",
+  "Principal": { "Service": "logdelivery.elasticloadbalancing.amazonaws.com" },
+  "Action": "s3:PutObject",
+  "Resource": "arn:aws:s3:::my-alb-logs/alb/AWSLogs/111122223333/*"
+}`,
+    },
   ],
 };
 
 const identity: Group = {
   id: 'identity',
   title: 'IAM for pods',
-  blurb: 'Give a pod real AWS permissions without baking credentials into it, both ways EKS supports.',
+  blurb:
+    'Give a pod real AWS permissions without baking credentials into it, both ways EKS supports.',
   snippets: [
     {
       id: 'id-oidc-provider',
@@ -432,7 +462,8 @@ spec:
 const karpenter: Group = {
   id: 'karpenter',
   title: 'Karpenter',
-  blurb: 'Node autoscaling: an EC2NodeClass describes the instances, a NodePool decides when and which ones to launch. Example provisions arm64 (Graviton) spot capacity.',
+  blurb:
+    'Node autoscaling: an EC2NodeClass describes the instances, a NodePool decides when and which ones to launch. Example provisions arm64 (Graviton) spot capacity.',
   snippets: [
     {
       id: 'kp-nodeclass',
@@ -449,6 +480,11 @@ spec:
     - tags: { karpenter.sh/discovery: my-cluster }
   securityGroupSelectorTerms:
     - tags: { karpenter.sh/discovery: my-cluster }
+  tags: { Project: worldskills }
+  detailedMonitoring: true
+  metadataOptions:
+    httpTokens: required
+    httpPutResponseHopLimit: 1
   blockDeviceMappings:
     - deviceName: /dev/xvda
       ebs:

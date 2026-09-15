@@ -3,15 +3,17 @@ ECS_SERVICE=my-service
 APP_CONTAINER=app
 TASK_ARN=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" --query 'services[0].taskDefinition' --output text)
 aws ecs describe-task-definition --task-definition "$TASK_ARN" --query taskDefinition > ecs-current.json
-jq -e --arg app "$APP_CONTAINER" '.networkMode == "awsvpc" and (.taskRoleArn | type == "string") and any(.containerDefinitions[]; .name == $app)' ecs-current.json
+jq -e --arg app "$APP_CONTAINER" '.networkMode == "awsvpc" and (.taskRoleArn | type == "string") and any(.containerDefinitions[]; .name == $app and .logConfiguration.logDriver == "awslogs")' ecs-current.json
 TASK_ROLE=$(jq -r .taskRoleArn ecs-current.json)
 aws iam attach-role-policy --role-name "${TASK_ROLE##*/}" --policy-arn "$POLICY_ARN"
 
 # Task CPU/memory must have room for the additional sidecar; app retries initial reads.
 jq --arg image "$AGENT_IMAGE" --arg region "$AWS_REGION" --arg path "$CONFIG_PATH" --arg app "$APP_CONTAINER" '
   del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy,.deregisteredAt)
+  | (.containerDefinitions[] | select(.name == $app) | .logConfiguration) as $logs
   | .containerDefinitions |= (map(select(.name != "appconfig-agent")) + [{
       name:"appconfig-agent", image:$image, essential:true, memoryReservation:64,
+      logConfiguration: ($logs | .options["awslogs-stream-prefix"] = "appconfig-agent"),
       environment:[
         {name:"SERVICE_REGION",value:$region},
         {name:"HTTP_HOST",value:"localhost"},
