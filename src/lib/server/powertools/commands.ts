@@ -46,6 +46,7 @@ function compiler(template: CloudFormationTemplate) {
     DLQName: 'DLQ_NAME',
     AccessLogName: 'ACCESS_LOG_NAME',
     TargetArn: 'TARGET_ARN',
+    EcrRepository: 'ECR_REPOSITORY',
   };
   const nameFields: Record<string, string> = {
     'AWS::IAM::Role': 'RoleName',
@@ -328,7 +329,9 @@ function cfnCommand(
     VpcId: 'VPC_ID',
     GroupNames: 'SG_NAMES',
     TargetArn: 'TARGET_ARN',
+    EcrRepository: 'ECR_REPOSITORY',
     Architecture: 'ARCHITECTURE',
+    EnableIpv6: 'ENABLE_IPV6',
   };
   const parameterNames = Object.keys(template.Parameters).sort(
     (a, b) => Number(!a.startsWith('Tag')) - Number(!b.startsWith('Tag')),
@@ -339,7 +342,9 @@ function cfnCommand(
         ? '$(aws iam get-role --role-name "${ROLE_NAME:?Set ROLE_NAME}" --query Role.Arn --output text)'
         : key === 'Architecture'
           ? '${ARCHITECTURE:-x86_64}'
-          : `\${${envParams[key]}:?Set ${envParams[key]}}`;
+          : key === 'EnableIpv6'
+            ? '${ENABLE_IPV6:-false}'
+            : `\${${envParams[key]}:?Set ${envParams[key]}}`;
     if (!envParams[key] && key !== 'RoleArn') throw Error('Unexpected bootstrap parameter: ' + key);
     return `ParameterKey=${key},ParameterValue="${key === 'GroupNames' ? "'" + value + "'" : value}"`;
   });
@@ -1157,7 +1162,7 @@ function directCommand(
       `for SG_NAME in "\${names[@]}"; do export SG_NAME && ${cliSteps(source).join(' && ')} || exit $?; done`,
     );
   else steps.push(...cliSteps(source));
-  if (['http-api', 'rest-api'].includes(kind)) {
+  if (['http-api', 'rest-api', 'ecs'].includes(kind)) {
     const outputs = Object.fromEntries(
       Object.entries(source.Outputs ?? {}).map(([name, output]) => [name, output.Value]),
     );

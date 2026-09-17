@@ -913,4 +913,409 @@ function rds() {
   return p;
 }
 
-export const infrastructureTools = [compute(false), compute(true), cloudfront(), rds()];
+function efs() {
+  const p = base(
+    'efs',
+    'EFS',
+    'Encrypted Regional EFS with automatic backups, TLS/IAM enforcement and a closed security group. Retains data. Create mount targets and allow client NFS access when configuring the workload; attach the optional access policy to its role.',
+  );
+  p.env!.push({ name: 'VPC_ID', example: 'vpc-0123456789abcdef0', required: true });
+  const t = p.template,
+    r = t.Resources;
+  t.Parameters.VpcId = { Type: 'AWS::EC2::VPC::Id' };
+  const clientActions = ['elasticfilesystem:ClientMount', 'elasticfilesystem:ClientWrite'];
+  const deny = (Sid: string, Action: string | string[], Condition?: object) => ({
+    Sid,
+    Effect: 'Deny',
+    Principal: '*',
+    Action,
+    Resource: '*',
+    ...(Condition ? { Condition } : {}),
+  });
+  r.FileSystem = resource(
+    'AWS::EFS::FileSystem',
+    {
+      Encrypted: true,
+      PerformanceMode: 'generalPurpose',
+      ThroughputMode: 'elastic',
+      BackupPolicy: { Status: 'ENABLED' },
+      FileSystemProtection: { ReplicationOverwriteProtection: 'ENABLED' },
+      FileSystemTags: namedTags,
+      FileSystemPolicy: policy(
+        deny('RequireTLS', clientActions, { Bool: { 'aws:SecureTransport': 'false' } }),
+        deny('RequireIAM', clientActions, { Null: { 'aws:PrincipalArn': 'true' } }),
+        deny('RequireAccessPoint', clientActions, {
+          Null: { 'elasticfilesystem:AccessPointArn': 'true' },
+        }),
+        deny('RequireMountTarget', clientActions, {
+          Bool: { 'elasticfilesystem:AccessedViaMountTarget': 'false' },
+        }),
+        deny('DenyRoot', 'elasticfilesystem:ClientRootAccess'),
+      ),
+    },
+    retain,
+  );
+  r.AccessPoint = resource(
+    'AWS::EFS::AccessPoint',
+    {
+      FileSystemId: ref('FileSystem'),
+      PosixUser: { Uid: '1000', Gid: '1000' },
+      RootDirectory: {
+        Path: '/app',
+        CreationInfo: { OwnerUid: '1000', OwnerGid: '1000', Permissions: '0750' },
+      },
+      AccessPointTags: namedTags,
+    },
+    retain,
+  );
+  r.MountTargetGroup = resource('AWS::EC2::SecurityGroup', {
+    VpcId: ref('VpcId'),
+    GroupDescription: 'EFS mount targets; add workload NFS ingress separately',
+    SecurityGroupIngress: [],
+    // CloudFormation requires an inert rule to suppress default allow-all egress.
+    SecurityGroupEgress: [{ IpProtocol: 'tcp', FromPort: 1, ToPort: 1, CidrIp: '127.0.0.1/32' }],
+    Tags: namedTags,
+  });
+  for (const [id, actions, description] of [
+    [
+      'EfsReadAccess',
+      ['elasticfilesystem:ClientMount'],
+      'Read this file system through its access point.',
+    ],
+    ['EfsWriteAccess', clientActions, 'Read and write this file system through its access point.'],
+  ] as const) {
+    r[id] = resource(
+      'AWS::IAM::ManagedPolicy',
+      {
+        Description: description,
+        PolicyDocument: policy({
+          Effect: 'Allow',
+          Action: actions,
+          Resource: att('FileSystem'),
+          Condition: {
+            StringEquals: { 'elasticfilesystem:AccessPointArn': att('AccessPoint', 'Arn') },
+            Bool: {
+              'aws:SecureTransport': 'true',
+              'elasticfilesystem:AccessedViaMountTarget': 'true',
+            },
+          },
+        }),
+      },
+      retain,
+    );
+  }
+  t.Outputs = {
+    FileSystemId: { Value: ref('FileSystem') },
+    AccessPointId: { Value: ref('AccessPoint') },
+    MountTargetSecurityGroupId: { Value: ref('MountTargetGroup') },
+    EfsReadAccessArn: {
+      Description: 'Optional policy: attach to a workload role for read access.',
+      Value: ref('EfsReadAccess'),
+    },
+    EfsWriteAccessArn: {
+      Description: 'Optional policy: attach to a workload role for read/write access.',
+      Value: ref('EfsWriteAccess'),
+    },
+  };
+  return p;
+}
+
+function vpc(publicSubnets: boolean) {
+  const p = base(
+    publicSubnets ? 'vpc-public-private' : 'vpc-private',
+    publicSubnets ? 'VPC · public + private (3 AZs)' : 'VPC · private only (3 AZs)',
+    `${publicSubnets ? 'Three public + three private subnets, IGW and automatic regional NAT.' : 'Three isolated private subnets; no internet gateway or NAT.'} DNS, DNSSEC, flow/query logs and S3/DynamoDB gateways included. Requires three available AZs. Network Address Usage metrics require a separate console setting; CloudFormation does not expose it.`,
+  );
+  p.env!.push({
+    name: 'ENABLE_IPV6',
+    example: 'true',
+    required: false,
+    default: 'false',
+    hint: publicSubnets
+      ? 'Adds /64 subnets, public IPv6 and private egress-only routes. Choose at creation; changing this replaces subnets.'
+      : 'Adds /64 subnets without internet routes. Choose at creation; changing this replaces subnets.',
+  });
+  const t = p.template,
+    r = t.Resources;
+  t.Parameters.EnableIpv6 = { Type: 'String', Default: 'false', AllowedValues: ['true', 'false'] };
+  t.Conditions = {
+    Ipv6Enabled: { 'Fn::Equals': [ref('EnableIpv6'), 'true'] },
+    Ipv6Disabled: { 'Fn::Not': [{ Condition: 'Ipv6Enabled' }] },
+  };
+  const ipv6 = (yes: any, no: any = ref('AWS::NoValue')) => ({
+    'Fn::If': ['Ipv6Enabled', yes, no],
+  });
+  const named = (suffix: string) => [{ Key: 'Name', Value: sub('${Name}-' + suffix) }, ...tags];
+  const az = (index: number) => ({ 'Fn::Select': [index, { 'Fn::GetAZs': '' }] });
+  const subnet = (tier: string, index: number) =>
+    ipv6(ref(`${tier}Subnet${index}DualStack`), ref(`${tier}Subnet${index}`));
+  const exported = (id: string, value: any) => ({
+    Value: value,
+    Export: { Name: sub('${AWS::StackName}-' + id) },
+  });
+  r.Vpc = resource('AWS::EC2::VPC', {
+    CidrBlock: '10.0.0.0/16',
+    EnableDnsSupport: true,
+    EnableDnsHostnames: true,
+    InstanceTenancy: 'default',
+    Tags: namedTags,
+  });
+  r.VpcIpv6 = resource(
+    'AWS::EC2::VPCCidrBlock',
+    {
+      VpcId: ref('Vpc'),
+      AmazonProvidedIpv6CidrBlock: true,
+    },
+    { Condition: 'Ipv6Enabled' },
+  );
+  r.PrivateRoutes = resource('AWS::EC2::RouteTable', { VpcId: ref('Vpc'), Tags: named('private') });
+  if (publicSubnets) {
+    r.PublicCidr = resource('AWS::EC2::VPCCidrBlock', {
+      VpcId: ref('Vpc'),
+      CidrBlock: '10.100.0.0/16',
+    });
+    r.PublicRoutes = resource('AWS::EC2::RouteTable', { VpcId: ref('Vpc'), Tags: named('public') });
+    r.InternetGateway = resource('AWS::EC2::InternetGateway', { Tags: namedTags });
+    r.InternetAttachment = resource('AWS::EC2::VPCGatewayAttachment', {
+      VpcId: ref('Vpc'),
+      InternetGatewayId: ref('InternetGateway'),
+    });
+    r.PublicDefaultRoute = resource(
+      'AWS::EC2::Route',
+      {
+        RouteTableId: ref('PublicRoutes'),
+        DestinationCidrBlock: '0.0.0.0/0',
+        GatewayId: ref('InternetGateway'),
+      },
+      { DependsOn: 'InternetAttachment' },
+    );
+    r.RegionalNat = resource(
+      'AWS::EC2::NatGateway',
+      {
+        VpcId: ref('Vpc'),
+        AvailabilityMode: 'regional',
+        ConnectivityType: 'public',
+        Tags: namedTags,
+      },
+      { DependsOn: 'InternetAttachment' },
+    );
+    r.PrivateDefaultRoute = resource('AWS::EC2::Route', {
+      RouteTableId: ref('PrivateRoutes'),
+      DestinationCidrBlock: '0.0.0.0/0',
+      NatGatewayId: ref('RegionalNat'),
+    });
+    r.EgressOnlyGateway = resource(
+      'AWS::EC2::EgressOnlyInternetGateway',
+      { VpcId: ref('Vpc') },
+      { Condition: 'Ipv6Enabled' },
+    );
+    r.PublicIpv6Route = resource(
+      'AWS::EC2::Route',
+      {
+        RouteTableId: ref('PublicRoutes'),
+        DestinationIpv6CidrBlock: '::/0',
+        GatewayId: ref('InternetGateway'),
+      },
+      { Condition: 'Ipv6Enabled', DependsOn: 'InternetAttachment' },
+    );
+    r.PrivateIpv6Route = resource(
+      'AWS::EC2::Route',
+      {
+        RouteTableId: ref('PrivateRoutes'),
+        DestinationIpv6CidrBlock: '::/0',
+        EgressOnlyInternetGatewayId: ref('EgressOnlyGateway'),
+      },
+      { Condition: 'Ipv6Enabled' },
+    );
+    t.Outputs!.RegionalNatId = { Value: ref('RegionalNat') };
+    t.Outputs!.PublicRouteTableId = exported('PublicRouteTableId', ref('PublicRoutes'));
+  }
+  for (const tier of publicSubnets ? ['Private', 'Public'] : ['Private']) {
+    for (const index of [1, 2, 3]) {
+      const id = `${tier}Subnet${index}`;
+      const props = {
+        VpcId: ref('Vpc'),
+        CidrBlock:
+          tier === 'Private' ? `10.0.${(index - 1) * 16}.0/20` : `10.100.${index - 1}.0/24`,
+        AvailabilityZone: az(index - 1),
+        MapPublicIpOnLaunch: false,
+        PrivateDnsNameOptionsOnLaunch: {
+          HostnameType: 'resource-name',
+          EnableResourceNameDnsARecord: true,
+        },
+        Tags: named(`${tier.toLowerCase()}-${index}`),
+      };
+      // Separate variants keep IPv4-only subnets independent of the conditional IPv6 association.
+      r[id] = resource('AWS::EC2::Subnet', props, {
+        Condition: 'Ipv6Disabled',
+        ...(tier === 'Public' ? { DependsOn: 'PublicCidr' } : {}),
+      });
+      r[id + 'DualStack'] = resource(
+        'AWS::EC2::Subnet',
+        {
+          ...props,
+          Ipv6CidrBlock: {
+            'Fn::Select': [
+              (tier === 'Private' ? 0 : 3) + index - 1,
+              { 'Fn::Cidr': [{ 'Fn::Select': [0, att('Vpc', 'Ipv6CidrBlocks')] }, 6, 64] },
+            ],
+          },
+          AssignIpv6AddressOnCreation: true,
+          PrivateDnsNameOptionsOnLaunch: {
+            ...props.PrivateDnsNameOptionsOnLaunch,
+            EnableResourceNameDnsAAAARecord: true,
+          },
+        },
+        {
+          Condition: 'Ipv6Enabled',
+          DependsOn: ['VpcIpv6', ...(tier === 'Public' ? ['PublicCidr'] : [])],
+        },
+      );
+      r[id + 'RouteAssociation'] = resource('AWS::EC2::SubnetRouteTableAssociation', {
+        SubnetId: subnet(tier, index),
+        RouteTableId: ref(`${tier}Routes`),
+      });
+      t.Outputs![id] = exported(id, subnet(tier, index));
+    }
+    t.Outputs![tier + 'SubnetIds'] = exported(tier + 'SubnetIds', {
+      'Fn::Join': [',', [1, 2, 3].map(i => subnet(tier, i))],
+    });
+  }
+  for (const service of ['s3', 'dynamodb']) {
+    r[service + 'Endpoint'] = resource('AWS::EC2::VPCEndpoint', {
+      VpcId: ref('Vpc'),
+      VpcEndpointType: 'Gateway',
+      ServiceName: sub('com.amazonaws.${AWS::Region}.' + service),
+      RouteTableIds: [ref('PrivateRoutes'), ...(publicSubnets ? [ref('PublicRoutes')] : [])],
+      Tags: named(service),
+    });
+  }
+  r.FlowLogs = logs('vpc');
+  r.FlowRole = role('vpc-flow-logs.amazonaws.com', [
+    allow(
+      ['logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams'],
+      att('FlowLogs'),
+    ),
+    allow('logs:DescribeLogGroups', '*'),
+  ]);
+  r.FlowRole.Properties!.AssumeRolePolicyDocument.Statement[0].Condition = {
+    StringEquals: { 'aws:SourceAccount': ref('AWS::AccountId') },
+    ArnLike: {
+      'aws:SourceArn': sub(
+        'arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:vpc-flow-log/*',
+      ),
+    },
+  };
+  r.FlowLog = resource('AWS::EC2::FlowLog', {
+    ResourceType: 'VPC',
+    ResourceId: ref('Vpc'),
+    TrafficType: 'ALL',
+    LogDestinationType: 'cloud-watch-logs',
+    LogGroupName: ref('FlowLogs'),
+    DeliverLogsPermissionArn: att('FlowRole'),
+    MaxAggregationInterval: 60,
+    Tags: tags,
+  });
+  r.DnsLogs = logs('dns');
+  r.DnsLogPolicy = resource('AWS::Logs::ResourcePolicy', {
+    PolicyName: sub('${AWS::StackName}-dns'),
+    PolicyDocument: sub(
+      JSON.stringify(
+        policy({
+          Effect: 'Allow',
+          Principal: { Service: 'delivery.logs.amazonaws.com' },
+          Action: ['logs:CreateLogStream', 'logs:PutLogEvents'],
+          Resource:
+            'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${DnsLogs}:log-stream:*',
+          Condition: {
+            StringEquals: { 'aws:SourceAccount': '${AWS::AccountId}' },
+            ArnLike: {
+              'aws:SourceArn': 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*',
+            },
+          },
+        }),
+      ),
+    ),
+  });
+  r.DnsQueryLogging = resource(
+    'AWS::Route53Resolver::ResolverQueryLoggingConfig',
+    {
+      Name: sub('${Name}-dns'),
+      DestinationArn: sub(
+        'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${DnsLogs}',
+      ),
+    },
+    { DependsOn: 'DnsLogPolicy' },
+  );
+  r.DnsQueryAssociation = resource('AWS::Route53Resolver::ResolverQueryLoggingConfigAssociation', {
+    ResolverQueryLogConfigId: ref('DnsQueryLogging'),
+    ResourceId: ref('Vpc'),
+  });
+  r.Dnssec = resource('AWS::Route53Resolver::ResolverDNSSECConfig', { ResourceId: ref('Vpc') });
+  if (publicSubnets) {
+    for (const index of [1, 2, 3]) {
+      for (const metric of ['ErrorPortAllocation', 'PacketsDropCount']) {
+        r[`${metric}Alarm${index}`] = resource('AWS::CloudWatch::Alarm', {
+          AlarmDescription:
+            'Regional NAT errors in this AZ; attach notification actions as needed.',
+          Namespace: 'AWS/NATGateway',
+          MetricName: metric,
+          Dimensions: [
+            { Name: 'NatGatewayId', Value: ref('RegionalNat') },
+            { Name: 'AvailabilityZone', Value: az(index - 1) },
+          ],
+          Statistic: 'Sum',
+          Period: 300,
+          EvaluationPeriods: 2,
+          Threshold: 0,
+          ComparisonOperator: 'GreaterThanThreshold',
+          TreatMissingData: 'notBreaching',
+          Tags: tags,
+        });
+        if (metric === 'PacketsDropCount') {
+          const props = r[`${metric}Alarm${index}`].Properties!;
+          const dimensions = props.Dimensions;
+          for (const key of ['Namespace', 'MetricName', 'Dimensions', 'Statistic', 'Period'])
+            delete props[key];
+          props.Threshold = 0.01;
+          props.Metrics = [
+            {
+              Id: 'droppercent',
+              Expression: 'IF(source + destination > 0, 100 * dropped / (source + destination), 0)',
+              Label: 'Dropped packets (%)',
+              ReturnData: true,
+            },
+            ...[
+              ['dropped', 'PacketsDropCount'],
+              ['source', 'PacketsInFromSource'],
+              ['destination', 'PacketsInFromDestination'],
+            ].map(([Id, MetricName]) => ({
+              Id,
+              ReturnData: false,
+              MetricStat: {
+                Metric: { Namespace: 'AWS/NATGateway', MetricName, Dimensions: dimensions },
+                Period: 300,
+                Stat: 'Sum',
+              },
+            })),
+          ];
+        }
+      }
+    }
+  }
+  t.Outputs!.VpcId = exported('VpcId', ref('Vpc'));
+  t.Outputs!.PrivateRouteTableId = exported('PrivateRouteTableId', ref('PrivateRoutes'));
+  t.Outputs!.FlowLogGroup = { Value: ref('FlowLogs') };
+  t.Outputs!.DnsLogGroup = { Value: ref('DnsLogs') };
+  return p;
+}
+
+export const infrastructureTools = [
+  compute(false),
+  compute(true),
+  cloudfront(),
+  rds(),
+  efs(),
+  vpc(true),
+  vpc(false),
+];

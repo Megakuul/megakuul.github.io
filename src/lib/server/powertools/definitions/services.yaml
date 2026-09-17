@@ -1992,8 +1992,12 @@
           example: my-cluster
           required: true
           type: string
-          hint: Enhanced Insights and 30-day Insights/Exec logs. Configure task roles, container security and service networking separately.
-          pattern: '[A-Za-z0-9_-]{1,64}'
+          hint: Creates a task execution role and 30-day task/Insights/Exec logs. Use the output role ARN as executionRoleArn; configure application task roles and ECS Exec permissions separately.
+          pattern: '[A-Za-z0-9_-]{1,54}'
+        - name: ECR_REPOSITORY
+          example: my-app
+          required: true
+          hint: Existing private ECR repository name in this account and region; execution role can pull only from this repository.
         - name: TAG_KEY
           example: Project
           required: true
@@ -2003,11 +2007,16 @@
       templateName: ecs
       template:
         AWSTemplateFormatVersion: 2010-09-09
-        Description: Fargate cluster with enhanced Container Insights and retained, protected 30-day performance/Exec logs. Task definitions, service networking, application logging and ECS Exec task permissions must be configured with the workload.
+        Description: Fargate cluster with enhanced Insights, protected 30-day logs and an execution role for one ECR repository and the task log group. Set executionRoleArn and awslogs-group from outputs. Add scoped secretsmanager:GetSecretValue, ssm:GetParameters or kms:Decrypt only when needed; application and ECS Exec permissions belong in taskRoleArn.
         Parameters:
           Name:
             Type: String
-            AllowedPattern: '[A-Za-z0-9_-]{1,64}'
+            AllowedPattern: '[A-Za-z0-9_-]{1,54}'
+          EcrRepository:
+            Type: String
+            MinLength: 2
+            MaxLength: 256
+            AllowedPattern: '(?:[a-z0-9]+(?:[._-][a-z0-9]+)*/)*[a-z0-9]+(?:[._-][a-z0-9]+)*'
           TagKey:
             Type: String
             Default: Project
@@ -2015,6 +2024,68 @@
             Type: String
             Default: powertools
         Resources:
+          TaskLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/ecs/${Name}/tasks
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          TaskExecutionRole:
+            Type: AWS::IAM::Role
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              RoleName:
+                Fn::Sub: ${Name}-execution
+              Description: Pull the task image and write container logs; use as executionRoleArn.
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: ecs-tasks.amazonaws.com
+                    Action: sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Ref: AWS::AccountId
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*
+              Policies:
+                - PolicyName: ImagePullAndLogs
+                  PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Effect: Allow
+                        Action: ecr:GetAuthorizationToken
+                        Resource: '*'
+                      - Effect: Allow
+                        Action:
+                          - ecr:BatchCheckLayerAvailability
+                          - ecr:GetDownloadUrlForLayer
+                          - ecr:BatchGetImage
+                        Resource:
+                          Fn::Sub: arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${EcrRepository}
+                      - Effect: Allow
+                        Action:
+                          - logs:CreateLogStream
+                          - logs:PutLogEvents
+                        Resource:
+                          Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/ecs/${Name}/tasks:log-stream:*
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
           ExecLogs:
             Type: AWS::Logs::LogGroup
             DeletionPolicy: Retain
@@ -2120,6 +2191,16 @@
                     Resource:
                       Fn::Sub: arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/${Name}/*
         Outputs:
+          TaskExecutionRoleArn:
+            Description: Set task definition executionRoleArn to this ARN (not taskRoleArn).
+            Value:
+              Fn::GetAtt:
+                - TaskExecutionRole
+                - Arn
+          TaskLogGroupName:
+            Description: Set the awslogs log driver awslogs-group to this value; use this region and a stream prefix.
+            Value:
+              Ref: TaskLogs
           ClusterArn:
             Value:
               Fn::GetAtt:
