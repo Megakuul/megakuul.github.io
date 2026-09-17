@@ -30,6 +30,18 @@
 
 ---
 
+> Enable VPC Network Address Usage (NAU) metrics before running out of network capacity
+
+CloudFormation does not expose this setting. Enable it after creating the VPC:
+
+```bash
+aws ec2 modify-vpc-attribute --vpc-id "$VPC_ID" --enable-network-address-usage-metrics
+```
+
+[AWS: VPC metrics and NAU monitoring](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-cloudwatch.html)
+
+---
+
 > Avoid lambda $LATEST version for production
 
 ~ A concerned citizen (Well Architected OPS06)

@@ -1021,10 +1021,11 @@ function efs() {
 }
 
 function vpc(publicSubnets: boolean) {
+  const ipv4Prefix = publicSubnets ? '10.0' : '10.100';
   const p = base(
     publicSubnets ? 'vpc-public-private' : 'vpc-private',
     publicSubnets ? 'VPC · public + private (3 AZs)' : 'VPC · private only (3 AZs)',
-    `${publicSubnets ? 'Three public + three private subnets, IGW and automatic regional NAT.' : 'Three isolated private subnets; no internet gateway or NAT.'} DNS, DNSSEC, flow/query logs and S3/DynamoDB gateways included. Requires three available AZs. Network Address Usage metrics require a separate console setting; CloudFormation does not expose it.`,
+    `${publicSubnets ? 'Three public + three private subnets, IGW and automatic regional NAT.' : 'Three isolated private subnets; no internet gateway or NAT.'} DNS, DNSSEC, flow/query logs and S3/DynamoDB gateways included. Requires three available AZs. Enable Network Address Usage metrics separately via CLI or console; CloudFormation does not expose it.`,
   );
   p.env!.push({
     name: 'ENABLE_IPV6',
@@ -1054,7 +1055,7 @@ function vpc(publicSubnets: boolean) {
     Export: { Name: sub('${AWS::StackName}-' + id) },
   });
   r.Vpc = resource('AWS::EC2::VPC', {
-    CidrBlock: '10.0.0.0/16',
+    CidrBlock: `${ipv4Prefix}.0.0/16`,
     EnableDnsSupport: true,
     EnableDnsHostnames: true,
     InstanceTenancy: 'default',
@@ -1070,10 +1071,6 @@ function vpc(publicSubnets: boolean) {
   );
   r.PrivateRoutes = resource('AWS::EC2::RouteTable', { VpcId: ref('Vpc'), Tags: named('private') });
   if (publicSubnets) {
-    r.PublicCidr = resource('AWS::EC2::VPCCidrBlock', {
-      VpcId: ref('Vpc'),
-      CidrBlock: '10.100.0.0/16',
-    });
     r.PublicRoutes = resource('AWS::EC2::RouteTable', { VpcId: ref('Vpc'), Tags: named('public') });
     r.InternetGateway = resource('AWS::EC2::InternetGateway', { Tags: namedTags });
     r.InternetAttachment = resource('AWS::EC2::VPCGatewayAttachment', {
@@ -1135,8 +1132,7 @@ function vpc(publicSubnets: boolean) {
       const id = `${tier}Subnet${index}`;
       const props = {
         VpcId: ref('Vpc'),
-        CidrBlock:
-          tier === 'Private' ? `10.0.${(index - 1) * 16}.0/20` : `10.100.${index - 1}.0/24`,
+        CidrBlock: `${ipv4Prefix}.${(tier === 'Private' ? 0 : 100) + index - 1}.0/24`,
         AvailabilityZone: az(index - 1),
         MapPublicIpOnLaunch: false,
         PrivateDnsNameOptionsOnLaunch: {
@@ -1148,7 +1144,6 @@ function vpc(publicSubnets: boolean) {
       // Separate variants keep IPv4-only subnets independent of the conditional IPv6 association.
       r[id] = resource('AWS::EC2::Subnet', props, {
         Condition: 'Ipv6Disabled',
-        ...(tier === 'Public' ? { DependsOn: 'PublicCidr' } : {}),
       });
       r[id + 'DualStack'] = resource(
         'AWS::EC2::Subnet',
@@ -1168,7 +1163,7 @@ function vpc(publicSubnets: boolean) {
         },
         {
           Condition: 'Ipv6Enabled',
-          DependsOn: ['VpcIpv6', ...(tier === 'Public' ? ['PublicCidr'] : [])],
+          DependsOn: ['VpcIpv6'],
         },
       );
       r[id + 'RouteAssociation'] = resource('AWS::EC2::SubnetRouteTableAssociation', {
