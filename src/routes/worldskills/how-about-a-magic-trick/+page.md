@@ -7,6 +7,24 @@
 
 ## Tricks
 
+### ARM64 Dockerbuilds on Cloudshell
+
+Install qemu buildx builder:
+```bash
+docker run --privileged --rm tonistiigi/binfmt --install arm64
+```
+
+Register driver to buildx:
+```bash
+docker buildx create --name multiarch --driver docker-container --use --bootstrap
+```
+
+Run docker build with buildx and platform spec:
+```bash
+docker buildx build --load --builder multiarch --platform linux/arm64 
+```
+
+
 ### SSH Keepalive
 
 Needs no introduction.

@@ -209,10 +209,24 @@ function compute(asg: boolean) {
     asg ? 'Launch Template + ASG' : 'EC2',
     asg
       ? 'Private AL2023 instances across two AZs; internal ALB, CPU autoscaling (2–4), SSM and logs. One NAT gateway. Attach the output client security group to authorized VPC clients.'
-      : 'Private AL2023 t3.micro; encrypted gp3, IMDSv2, SSM, logs and status alarm. Creates a VPC and one NAT gateway; no inbound access.',
+      : 'Private AL2023 instance; encrypted gp3, IMDSv2, SSM, logs and status alarm. Creates a VPC and one NAT gateway; no inbound access.',
   );
   const t = p.template,
     r = t.Resources;
+  p.env!.push({
+    name: 'ARCHITECTURE',
+    example: 'arm64',
+    required: false,
+    default: 'x86_64',
+    hint: 'x86_64 (t3.micro) or arm64 (t4g.micro); selects a matching AL2023 AMI.',
+  });
+  t.Parameters.Architecture = {
+    Type: 'String',
+    Default: 'x86_64',
+    AllowedValues: ['x86_64', 'arm64'],
+    Description: 'CPU architecture; selects the matching AL2023 AMI and micro instance type.',
+  };
+  t.Conditions = { IsArm64: { 'Fn::Equals': [ref('Architecture'), 'arm64'] } };
   network(t);
   r.AppLogs = logs('ec2');
   r.InstanceRole = role(
@@ -273,9 +287,10 @@ function compute(asg: boolean) {
     LaunchTemplateName: sub('${AWS::StackName}-launch'),
     TagSpecifications: [{ ResourceType: 'launch-template', Tags: namedTags }],
     LaunchTemplateData: {
-      ImageId:
-        '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}',
-      InstanceType: 't3.micro',
+      ImageId: sub(
+        '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-${Architecture}}}',
+      ),
+      InstanceType: { 'Fn::If': ['IsArm64', 't4g.micro', 't3.micro'] },
       IamInstanceProfile: { Arn: att('InstanceProfile') },
       Monitoring: { Enabled: true },
       EbsOptimized: true,

@@ -328,6 +328,7 @@ function cfnCommand(
     VpcId: 'VPC_ID',
     GroupNames: 'SG_NAMES',
     TargetArn: 'TARGET_ARN',
+    Architecture: 'ARCHITECTURE',
   };
   const parameterNames = Object.keys(template.Parameters).sort(
     (a, b) => Number(!a.startsWith('Tag')) - Number(!b.startsWith('Tag')),
@@ -336,7 +337,9 @@ function cfnCommand(
     const value =
       key === 'RoleArn'
         ? '$(aws iam get-role --role-name "${ROLE_NAME:?Set ROLE_NAME}" --query Role.Arn --output text)'
-        : `\${${envParams[key]}:?Set ${envParams[key]}}`;
+        : key === 'Architecture'
+          ? '${ARCHITECTURE:-x86_64}'
+          : `\${${envParams[key]}:?Set ${envParams[key]}}`;
     if (!envParams[key] && key !== 'RoleArn') throw Error('Unexpected bootstrap parameter: ' + key);
     return `ParameterKey=${key},ParameterValue="${key === 'GroupNames' ? "'" + value + "'" : value}"`;
   });

@@ -280,6 +280,115 @@ spec:
                 port: { number: 80 }`,
     },
     {
+      id: 'wl-alb-target-group',
+      title: 'ALB TargetGroupBinding (EKS Auto Mode)',
+      note: 'Binds the ClusterIP Service my-app above to an existing ALB target group. Apply in the same namespace as the Service; replace the ARN and cluster name.',
+      code: `# Requires Auto Mode load balancing; no extra controller.
+# Existing IP target group + ALB listener; allow ALB -> pods on TCP 8080.
+# Required target group tag:
+# aws elbv2 add-tags --resource-arns <target-group-arn> --tags Key=eks:eks-cluster-name,Value=my-cluster
+# Auto Mode deletes the target group when this binding or the cluster is deleted.
+apiVersion: eks.amazonaws.com/v1
+kind: TargetGroupBinding
+metadata:
+  name: my-app-alb
+  namespace: default
+spec:
+  targetGroupARN: arn:aws:elasticloadbalancing:eu-central-1:111122223333:targetgroup/my-app/0123456789abcdef
+  targetType: ip
+  serviceRef:
+    name: my-app
+    port: 80`,
+    },
+    {
+      id: 'wl-lattice-target-group',
+      title: 'VPC Lattice target group (ServiceExport)',
+      note: 'Creates only a target group for the existing my-app Service and registers its pods. Configure the Lattice service/listener separately, or use the Gateway + HTTPRoute alternative below.',
+      code: `# Even on Auto Mode: install AWS Gateway API Controller + CRDs + controller IAM role.
+# Setup: https://www.gateway-api-controller.eks.aws.dev/latest/guides/deploy/
+# Allow the regional Lattice managed prefix list -> pods on TCP 8080.
+apiVersion: application-networking.k8s.aws/v1alpha1
+kind: ServiceExport
+metadata:
+  name: my-app
+  namespace: default
+  annotations:
+    application-networking.k8s.aws/tags: "Project=worldskills,Environment=dev"
+spec:
+  exportedPorts:
+    - port: 80
+      routeType: HTTP`,
+    },
+    {
+      id: 'wl-lattice-route',
+      title: 'VPC Lattice service (Gateway + HTTPRoute + TargetGroupPolicy)',
+      note: 'Alternative to ServiceExport: creates a Lattice service, listener, rules and pod target group for the existing my-app Kubernetes Service. TargetGroupPolicy configures backend protocol and health checks.',
+      code: `# Requires the same Lattice controller, CRDs, IAM and network setup as above.
+# Create/tag service network my-network and its client VPC associations in your IaC.
+# Route tags cover service, listeners, rules, target groups and service-network service association.
+# Controller IAM needs tag:TagResources, tag:UntagResources and tag:GetResources.
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: amazon-vpc-lattice
+spec:
+  controllerName: application-networking.k8s.aws/gateway-api-controller
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: my-network
+  namespace: default
+spec:
+  gatewayClassName: amazon-vpc-lattice
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: application-networking.k8s.aws/v1alpha1
+kind: TargetGroupPolicy
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  targetRef:
+    group: ""
+    kind: Service
+    name: my-app
+  protocol: HTTP
+  protocolVersion: HTTP1
+  healthCheck:
+    enabled: true
+    path: /health  # Must be served by the app
+    port: 8080
+    protocol: HTTP
+    statusMatch: "200"
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: my-app
+  namespace: default
+  annotations:
+    application-networking.k8s.aws/tags: "Project=worldskills,Environment=dev"
+spec:
+  parentRefs:
+    - name: my-network
+      sectionName: http
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: my-app
+          port: 80`,
+    },
+    {
       id: 'wl-alb-log-policy',
       title: 'ALB log policy',
       note: 'Add this statement to the log bucket policy. Match the bucket, account and prefix; use SSE-S3 encryption and enable lifecycle separately.',
