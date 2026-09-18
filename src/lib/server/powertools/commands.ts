@@ -60,6 +60,7 @@ function compiler(template: CloudFormationTemplate) {
     'AWS::Events::EventBus': 'Name',
     'AWS::CloudWatch::Alarm': 'AlarmName',
     'AWS::Logs::DeliveryDestination': 'Name',
+    'AWS::Logs::DeliverySource': 'Name',
     'AWS::WAFv2::WebACL': 'Name',
     'AWS::S3::Bucket': 'BucketName',
     'AWS::Config::ConfigurationRecorder': 'Name',
@@ -327,6 +328,7 @@ function cfnCommand(
     Namespace: 'NAMESPACE',
     ServiceAccount: 'SERVICE_ACCOUNT',
     VpcId: 'VPC_ID',
+    SubnetIds: 'SUBNET_IDS',
     GroupNames: 'SG_NAMES',
     TargetArn: 'TARGET_ARN',
     EcrRepository: 'ECR_REPOSITORY',
@@ -346,7 +348,7 @@ function cfnCommand(
             ? '${ENABLE_IPV6:-false}'
             : `\${${envParams[key]}:?Set ${envParams[key]}}`;
     if (!envParams[key] && key !== 'RoleArn') throw Error('Unexpected bootstrap parameter: ' + key);
-    return `ParameterKey=${key},ParameterValue="${key === 'GroupNames' ? "'" + value + "'" : value}"`;
+    return `ParameterKey=${key},ParameterValue="${['GroupNames', 'SubnetIds'].includes(key) ? "'" + value + "'" : value}"`;
   });
   const capabilities = [];
   if (Object.values(template.Resources).some(r => r.Type?.startsWith('AWS::IAM::')))
@@ -496,6 +498,7 @@ function cliSteps(template: CloudFormationTemplate, skip: string[] = []) {
       case 'AWS::Logs::LogGroup':
         request('logs', 'create-log-group', {
           logGroupName: n,
+          ...(p.KmsKeyId ? { kmsKeyId: p.KmsKeyId } : {}),
           tags: tagmap(t),
           deletionProtectionEnabled: true,
         });
@@ -520,6 +523,21 @@ function cliSteps(template: CloudFormationTemplate, skip: string[] = []) {
           id,
         );
         output(id, '.deliveryDestination.arn', 'A');
+        break;
+      case 'AWS::Logs::DeliverySource':
+        request('logs', 'put-delivery-source', {
+          name: n,
+          resourceArn: p.ResourceArn,
+          logType: p.LogType,
+          tags: tagmap(t),
+        });
+        break;
+      case 'AWS::Logs::Delivery':
+        request('logs', 'create-delivery', {
+          deliverySourceName: p.DeliverySourceName,
+          deliveryDestinationArn: p.DeliveryDestinationArn,
+          tags: tagmap(t),
+        });
         break;
       case 'AWS::IAM::Role':
         request('iam', 'create-role', {
@@ -909,12 +927,23 @@ function cliSteps(template: CloudFormationTemplate, skip: string[] = []) {
         request('ecs', 'create-cluster', {
           clusterName: n,
           configuration: {
+            managedStorageConfiguration: p.Configuration.ManagedStorageConfiguration
+              ? {
+                  kmsKeyId: p.Configuration.ManagedStorageConfiguration.KmsKeyId,
+                  fargateEphemeralStorageKmsKeyId:
+                    p.Configuration.ManagedStorageConfiguration.FargateEphemeralStorageKmsKeyId,
+                }
+              : undefined,
             executeCommandConfiguration: {
+              kmsKeyId: p.Configuration.ExecuteCommandConfiguration.KmsKeyId,
               logging: 'OVERRIDE',
               logConfiguration: {
                 cloudWatchLogGroupName:
                   p.Configuration.ExecuteCommandConfiguration.LogConfiguration
                     .CloudWatchLogGroupName,
+                cloudWatchEncryptionEnabled:
+                  p.Configuration.ExecuteCommandConfiguration.LogConfiguration
+                    .CloudWatchEncryptionEnabled,
               },
             },
           },
@@ -1130,7 +1159,7 @@ function directCommand(
   const hasPolicies = Object.values(template.Resources).some(
     resource => resource.Type === 'AWS::IAM::ManagedPolicy',
   );
-  const simple = hasPolicies ? null : simpleCommand(kind);
+  const simple = hasPolicies || template.Resources.LogEncryptionKey ? null : simpleCommand(kind);
   if (simple) return simple;
   const source = structuredClone(template);
   if (kind === 'security-groups') {

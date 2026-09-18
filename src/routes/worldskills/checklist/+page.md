@@ -79,7 +79,12 @@
 
 ## ECS
 
+- Regional account defaults: enhanced Container Insights; ENI trunking only with supported new Linux EC2 hosts and compatible subnet/DNS settings
+- GuardDuty Runtime Monitoring and Fargate agent management enabled; verify coverage after planned task redeployment; configure EC2 host agents separately
 - Enhanced Container Insights enabled
+- ECS Action Logs delivery enabled; separate from Container Insights and ECS Exec
+- Task, Insights, Exec and Action log groups have retention and the required KMS encryption
+- Cluster encryption configured for Exec sessions and managed/Fargate storage; grant the required task/operator/infrastructure-role key permissions
 - Every application/sidecar container has a log configuration
 - Service autoscaling policy configured, with at least two tasks when required
 - Fargate used when specified; service/task tags propagated
@@ -131,6 +136,7 @@
 ## KMS, Secrets Manager & SSM Parameter Store
 
 - KMS key rotation enabled (off by default)
+- CloudWatch Logs customer-managed keys scoped by log-group encryption context; retain keys with retained logs
 - Sensitive SSM parameters are `SecureString`, not plain `String`
 - Secrets Manager rotation enabled; RDS-managed master secrets rotate automatically, generic secrets need a workload-specific rotation function
 - Parameter Store Intelligent-Tiering enabled for the account and Region

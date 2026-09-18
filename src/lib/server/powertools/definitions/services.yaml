@@ -1992,7 +1992,7 @@
           example: my-cluster
           required: true
           type: string
-          hint: Creates a task execution role and 30-day task/Insights/Exec logs. Use the output role ARN as executionRoleArn; configure application task roles and ECS Exec permissions separately.
+          hint: Fargate cluster; Action Logs, enhanced Insights, KMS-encrypted logs, Exec sessions and storage. Use Linux platform 1.4.0+; output policies provide optional Exec access for task roles and operators.
           pattern: '[A-Za-z0-9_-]{1,54}'
         - name: ECR_REPOSITORY
           example: my-app
@@ -2007,7 +2007,7 @@
       templateName: ecs
       template:
         AWSTemplateFormatVersion: 2010-09-09
-        Description: Fargate cluster with enhanced Insights, protected 30-day logs and an execution role for one ECR repository and the task log group. Set executionRoleArn and awslogs-group from outputs. Add scoped secretsmanager:GetSecretValue, ssm:GetParameters or kms:Decrypt only when needed; application and ECS Exec permissions belong in taskRoleArn.
+        Description: Fargate cluster with Action Logs, enhanced Insights and KMS-encrypted logs, Exec sessions and storage. Linux platform 1.4.0+ required for customer-managed ephemeral storage encryption. Use executionRoleArn and awslogs-group outputs; attach optional Exec policies to task roles and operators. Deployment requires ecs:AllowVendedLogDeliveryForResource and CloudWatch Logs delivery permissions.
         Parameters:
           Name:
             Type: String
@@ -2114,6 +2114,79 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
+          ExecKey:
+            Type: AWS::KMS::Key
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: ECS Exec session encryption; grant task/operator access using the output policies.
+              EnableKeyRotation: true
+              KeySpec: SYMMETRIC_DEFAULT
+              KeyUsage: ENCRYPT_DECRYPT
+              PendingWindowInDays: 30
+              KeyPolicy:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      AWS:
+                        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+                    Action: kms:*
+                    Resource: '*'
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          StorageKey:
+            Type: AWS::KMS::Key
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: ECS managed volumes and Fargate ephemeral storage for this cluster.
+              EnableKeyRotation: true
+              KeySpec: SYMMETRIC_DEFAULT
+              KeyUsage: ENCRYPT_DECRYPT
+              MultiRegion: false
+              PendingWindowInDays: 30
+              KeyPolicy:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      AWS:
+                        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+                    Action: kms:*
+                    Resource: '*'
+                  - Effect: Allow
+                    Principal:
+                      Service: fargate.amazonaws.com
+                    Action: kms:GenerateDataKeyWithoutPlaintext
+                    Resource: '*'
+                    Condition:
+                      StringEquals:
+                        kms:EncryptionContext:aws:ecs:clusterAccount:
+                          Ref: AWS::AccountId
+                        kms:EncryptionContext:aws:ecs:clusterName:
+                          Ref: Name
+                  - Effect: Allow
+                    Principal:
+                      Service: fargate.amazonaws.com
+                    Action: kms:CreateGrant
+                    Resource: '*'
+                    Condition:
+                      StringEquals:
+                        kms:EncryptionContext:aws:ecs:clusterAccount:
+                          Ref: AWS::AccountId
+                        kms:EncryptionContext:aws:ecs:clusterName:
+                          Ref: Name
+                      ForAllValues:StringEquals:
+                        kms:GrantOperations: [Decrypt]
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
           Cluster:
             Type: AWS::ECS::Cluster
             DependsOn: InsightsLogs
@@ -2123,9 +2196,17 @@
               ClusterName:
                 Ref: Name
               Configuration:
+                ManagedStorageConfiguration:
+                  KmsKeyId:
+                    Fn::GetAtt: [StorageKey, Arn]
+                  FargateEphemeralStorageKmsKeyId:
+                    Fn::GetAtt: [StorageKey, Arn]
                 ExecuteCommandConfiguration:
+                  KmsKeyId:
+                    Fn::GetAtt: [ExecKey, Arn]
                   Logging: OVERRIDE
                   LogConfiguration:
+                    CloudWatchEncryptionEnabled: true
                     CloudWatchLogGroupName:
                       Ref: ExecLogs
               ClusterSettings:
@@ -2143,6 +2224,128 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
+          ActionLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/vendedlogs/ecs/action-logs/${Name}
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          ActionLogsPolicy:
+            Type: AWS::Logs::ResourcePolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              PolicyName:
+                Fn::Sub: ${Name}-ecs-action-logs
+              PolicyDocument:
+                Fn::Sub: >-
+                  {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"delivery.logs.amazonaws.com"},"Action":["logs:CreateLogStream","logs:PutLogEvents"],"Resource":"arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ActionLogs}:log-stream:*","Condition":{"StringEquals":{"aws:SourceAccount":"${AWS::AccountId}"},"ArnLike":{"aws:SourceArn":"arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:delivery-source:${Name}-ecs"}}}]}
+          ActionLogSource:
+            Type: AWS::Logs::DeliverySource
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Name:
+                Fn::Sub: ${Name}-ecs
+              ResourceArn:
+                Fn::GetAtt: [Cluster, Arn]
+              LogType: EcsActionLogs
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          ActionLogDestination:
+            Type: AWS::Logs::DeliveryDestination
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Name:
+                Fn::Sub: ${Name}-ecs
+              DestinationResourceArn:
+                Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ActionLogs}
+              OutputFormat: json
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          ActionLogDelivery:
+            Type: AWS::Logs::Delivery
+            DependsOn: ActionLogsPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              DeliverySourceName:
+                Ref: ActionLogSource
+              DeliveryDestinationArn:
+                Fn::GetAtt: [ActionLogDestination, Arn]
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+          EcsExecTaskAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Attach to taskRoleArn for encrypted ECS Exec and transcript logging.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - ssmmessages:CreateControlChannel
+                      - ssmmessages:CreateDataChannel
+                      - ssmmessages:OpenControlChannel
+                      - ssmmessages:OpenDataChannel
+                    Resource: '*'
+                  - Effect: Allow
+                    Action: kms:Decrypt
+                    Resource:
+                      Fn::GetAtt: [ExecKey, Arn]
+                  - Effect: Allow
+                    Action: logs:DescribeLogGroups
+                    Resource: '*'
+                  - Effect: Allow
+                    Action: logs:DescribeLogStreams
+                    Resource:
+                      Fn::GetAtt: [ExecLogs, Arn]
+                  - Effect: Allow
+                    Action: [logs:CreateLogStream, logs:PutLogEvents]
+                    Resource:
+                      Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${ExecLogs}:log-stream:*
+          EcsExecOperatorAccess:
+            Type: AWS::IAM::ManagedPolicy
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              Description: Optional operator access to execute commands in this cluster using its session key.
+              PolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Action: ecs:ExecuteCommand
+                    Resource:
+                      - Fn::GetAtt: [Cluster, Arn]
+                      - Fn::Sub: arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/${Name}/*
+                    Condition:
+                      ArnEquals:
+                        ecs:cluster:
+                          Fn::GetAtt: [Cluster, Arn]
+                  - Effect: Allow
+                    Action: kms:GenerateDataKey
+                    Resource:
+                      Fn::GetAtt: [ExecKey, Arn]
           EcsRunAccess:
             Type: AWS::IAM::ManagedPolicy
             DeletionPolicy: Retain
@@ -2197,6 +2400,29 @@
               Fn::GetAtt:
                 - TaskExecutionRole
                 - Arn
+          ExecKeyArn:
+            Value:
+              Fn::GetAtt: [ExecKey, Arn]
+          StorageKeyArn:
+            Description: Managed EBS volumes also need an ECS infrastructure role with scoped KMS use/grant permissions.
+            Value:
+              Fn::GetAtt: [StorageKey, Arn]
+          EcsExecTaskAccessArn:
+            Description: Optional policy for taskRoleArn; enable ECS Exec and include script/cat in the container image.
+            Value:
+              Ref: EcsExecTaskAccess
+          EcsExecOperatorAccessArn:
+            Description: Optional policy for authorized Exec operators; task networks need access to SSM Messages, Logs and KMS.
+            Value:
+              Ref: EcsExecOperatorAccess
+          ActionLogGroupName:
+            Description: ECS deployment and orchestration actions; delivery begins when ECS emits actions.
+            Value:
+              Ref: ActionLogs
+          ExecLogGroupName:
+            Description: ECS Exec transcripts; enable Exec on the service/task and grant the task role log-write and SSM channel permissions.
+            Value:
+              Ref: ExecLogs
           TaskLogGroupName:
             Description: Set the awslogs log driver awslogs-group to this value; use this region and a stream prefix.
             Value:

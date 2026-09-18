@@ -721,6 +721,144 @@ function cloudfront() {
   return p;
 }
 
+function loadBalancer(kind: 'alb' | 'nlb') {
+  const application = kind === 'alb';
+  const p = base(
+    kind,
+    kind.toUpperCase(),
+    `Internal load balancer; deletion protection, cross-zone balancing, 30-day access logs${application ? ' and enforcing WAF' : ''}. Add listeners, targets and security-group rules for your workload; use HTTPS/TLS.${application ? '' : ' NLB access logs capture TLS listeners only.'}`,
+  );
+  p.env!.push(
+    { name: 'VPC_ID', example: 'vpc-0123456789abcdef0', required: true },
+    {
+      name: 'SUBNET_IDS',
+      example: 'subnet-0123456789abcdef0,subnet-0123456789abcdef1',
+      required: true,
+      hint: 'Same VPC; one subnet per AZ, at least two AZs.',
+    },
+  );
+  const t = p.template,
+    r = t.Resources;
+  t.Parameters.Name.AllowedPattern = '(?!internal-)[a-z](?:[a-z0-9-]{0,22}[a-z0-9])?';
+  t.Parameters.VpcId = { Type: 'AWS::EC2::VPC::Id' };
+  t.Parameters.SubnetIds = { Type: 'List<AWS::EC2::Subnet::Id>' };
+  t.Rules = {
+    SubnetsInVpc: {
+      Assertions: [
+        {
+          Assert: {
+            'Fn::EachMemberEquals': [{ 'Fn::ValueOf': ['SubnetIds', 'VpcId'] }, ref('VpcId')],
+          },
+          AssertDescription: 'All subnets must belong to VPC_ID.',
+        },
+      ],
+    },
+  };
+  r.LoadBalancerGroup = resource('AWS::EC2::SecurityGroup', {
+    VpcId: ref('VpcId'),
+    GroupDescription: 'Load balancer; add client ingress and target/health-check egress',
+    SecurityGroupIngress: [],
+    // An explicit non-routable rule suppresses EC2's default allow-all egress.
+    SecurityGroupEgress: [{ IpProtocol: 'tcp', FromPort: 1, ToPort: 1, CidrIp: '127.0.0.1/32' }],
+    Tags: namedTags,
+  });
+  r.AccessLogs = bucket({
+    LifecycleConfiguration: {
+      Rules: [
+        {
+          Id: 'Logs',
+          Status: 'Enabled',
+          ExpirationInDays: 30,
+          NoncurrentVersionExpiration: { NoncurrentDays: 30 },
+          AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 },
+        },
+      ],
+    },
+  });
+  // ALB and NLB use different log delivery services and bucket permissions.
+  const nlbSource = {
+    StringEquals: { 'aws:SourceAccount': ref('AWS::AccountId') },
+    ArnLike: {
+      'aws:SourceArn': sub('arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*'),
+    },
+  };
+  const delivery = application
+    ? [
+        {
+          Effect: 'Allow',
+          Principal: { Service: 'logdelivery.elasticloadbalancing.amazonaws.com' },
+          Action: 's3:PutObject',
+          Resource: sub('${AccessLogs.Arn}/alb/AWSLogs/${AWS::AccountId}/*'),
+          Condition: {
+            ArnLike: {
+              'aws:SourceArn': sub(
+                'arn:${AWS::Partition}:elasticloadbalancing:${AWS::Region}:${AWS::AccountId}:loadbalancer/*',
+              ),
+            },
+          },
+        },
+      ]
+    : [
+        {
+          Effect: 'Allow',
+          Principal: { Service: 'delivery.logs.amazonaws.com' },
+          Action: 's3:GetBucketAcl',
+          Resource: att('AccessLogs'),
+          Condition: nlbSource,
+        },
+        {
+          Effect: 'Allow',
+          Principal: { Service: 'delivery.logs.amazonaws.com' },
+          Action: 's3:PutObject',
+          Resource: sub('${AccessLogs.Arn}/nlb/AWSLogs/${AWS::AccountId}/*'),
+          Condition: {
+            ...nlbSource,
+            StringEquals: {
+              ...nlbSource.StringEquals,
+              's3:x-amz-acl': 'bucket-owner-full-control',
+            },
+          },
+        },
+      ];
+  r.AccessLogsPolicy = resource('AWS::S3::BucketPolicy', {
+    Bucket: ref('AccessLogs'),
+    PolicyDocument: policy(tls('AccessLogs'), ...delivery),
+  });
+  r.LoadBalancer = resource(
+    'AWS::ElasticLoadBalancingV2::LoadBalancer',
+    {
+      Name: ref('Name'),
+      Scheme: 'internal',
+      Type: application ? 'application' : 'network',
+      Subnets: ref('SubnetIds'),
+      SecurityGroups: [ref('LoadBalancerGroup')],
+      LoadBalancerAttributes: [
+        { Key: 'deletion_protection.enabled', Value: 'true' },
+        { Key: 'load_balancing.cross_zone.enabled', Value: 'true' },
+        { Key: 'access_logs.s3.enabled', Value: 'true' },
+        { Key: 'access_logs.s3.bucket', Value: ref('AccessLogs') },
+        { Key: 'access_logs.s3.prefix', Value: kind },
+        ...(application
+          ? [
+              {
+                Key: 'routing.http.drop_invalid_header_fields.enabled',
+                Value: 'true',
+              },
+            ]
+          : []),
+      ],
+      Tags: namedTags,
+    },
+    { DependsOn: 'AccessLogsPolicy' },
+  );
+  if (application) regionalWaf(t, ref('LoadBalancer'));
+  t.Outputs!.LoadBalancerArn = { Value: ref('LoadBalancer') };
+  t.Outputs!.DnsName = { Value: att('LoadBalancer', 'DNSName') };
+  t.Outputs!.SecurityGroupId = { Value: ref('LoadBalancerGroup') };
+  t.Outputs!.AccessLogBucket = { Value: ref('AccessLogs') };
+  return p;
+}
+
 function rds() {
   const p = base(
     'rds',
@@ -1308,6 +1446,8 @@ function vpc(publicSubnets: boolean) {
 export const infrastructureTools = [
   compute(false),
   compute(true),
+  loadBalancer('alb'),
+  loadBalancer('nlb'),
   cloudfront(),
   rds(),
   efs(),

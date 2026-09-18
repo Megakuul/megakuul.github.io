@@ -7,6 +7,7 @@ import services from './definitions/services.yaml?raw';
 import roles from './definitions/roles.yaml?raw';
 import policies from './definitions/policies.yaml?raw';
 import { infrastructureTools } from './infrastructure';
+import { encryptLogGroups } from './log-encryption';
 
 const definitions = [environment, setup, services, roles, policies]
   .flatMap(source => parse(source) as DefinitionGroup[])
@@ -14,7 +15,14 @@ const definitions = [environment, setup, services, roles, policies]
     group.id === 'services'
       ? { ...group, recipes: [...group.recipes, ...infrastructureTools] }
       : group,
-  );
+  )
+  .map(group => ({
+    ...group,
+    recipes: group.recipes.map(recipe => ({
+      ...recipe,
+      ...(recipe.template ? { template: encryptLogGroups(recipe.template) } : {}),
+    })),
+  }));
 
 export function powertoolsGroups(): ToolGroup[] {
   return definitions.map(group => ({
