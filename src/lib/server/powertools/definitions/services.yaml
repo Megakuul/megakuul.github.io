@@ -1832,7 +1832,7 @@
           example: my-cluster
           required: true
           type: string
-          hint: Fargate cluster; automatic Cloud Map HTTP namespace for Service Connect, Action Logs, enhanced Insights, KMS-encrypted logs, Exec sessions and storage. Enable Service Connect on individual services to use the namespace. Use Linux platform 1.4.0+; output policies provide optional Exec access for task roles and operators.
+          hint: Fargate cluster; automatic Cloud Map HTTP namespace for Service Connect, Action Logs, enhanced Insights, KMS-encrypted logs, Exec sessions and storage. Enable Service Connect on individual services to use the namespace. Use Linux platform 1.4.0+; the task role includes Exec permissions; the operator policy is optional.
           pattern: '[A-Za-z0-9_-]{1,54}'
         - name: ECR_REPOSITORY
           example: my-app
@@ -1847,7 +1847,7 @@
       templateName: ecs
       template:
         AWSTemplateFormatVersion: 2010-09-09
-        Description: Fargate cluster with Action Logs, enhanced Insights and KMS-encrypted logs, Exec sessions and storage. Linux platform 1.4.0+ required for customer-managed ephemeral storage encryption. Use executionRoleArn and awslogs-group outputs; attach optional Exec policies to task roles and operators. Deployment requires ecs:AllowVendedLogDeliveryForResource and CloudWatch Logs delivery permissions.
+        Description: Fargate cluster with Action Logs, enhanced Insights and KMS-encrypted logs, Exec sessions and storage. Linux platform 1.4.0+ required for customer-managed ephemeral storage encryption. Use taskRoleArn, executionRoleArn and awslogs-group outputs; the task role includes Exec permissions. Attach the optional Exec operator policy as needed. Deployment requires ecs:AllowVendedLogDeliveryForResource and CloudWatch Logs delivery permissions.
         Parameters:
           Name:
             Type: String
@@ -2136,12 +2136,41 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
+          TaskRole:
+            Type: AWS::IAM::Role
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              RoleName:
+                Fn::Sub: ${Name}-task
+              Description: Application task role with encrypted ECS Exec access; use as taskRoleArn.
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: ecs-tasks.amazonaws.com
+                    Action: sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        aws:SourceAccount:
+                          Ref: AWS::AccountId
+                      ArnLike:
+                        aws:SourceArn:
+                          Fn::Sub: arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
           EcsExecTaskAccess:
             Type: AWS::IAM::ManagedPolicy
             DeletionPolicy: Retain
             UpdateReplacePolicy: Retain
             Properties:
-              Description: Attach to taskRoleArn for encrypted ECS Exec and transcript logging.
+              Description: Attached to the task role for encrypted ECS Exec and transcript logging.
+              Roles:
+                - Ref: TaskRole
               PolicyDocument:
                 Version: 2012-10-17
                 Statement:
@@ -2237,6 +2266,10 @@
                     Resource:
                       Fn::Sub: arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/${Name}/*
         Outputs:
+          TaskRoleArn:
+            Description: Use as taskRoleArn; includes SSM channels, session-key decrypt and Exec transcript logging. Add application permissions as needed.
+            Value:
+              Fn::GetAtt: [TaskRole, Arn]
           TaskExecutionRoleArn:
             Description: Use as executionRoleArn, not taskRoleArn. Writes only to the pre-provisioned TaskLogGroupName; leave awslogs-create-group false.
             Value:
@@ -2251,7 +2284,7 @@
             Value:
               Fn::GetAtt: [StorageKey, Arn]
           EcsExecTaskAccessArn:
-            Description: Optional policy for taskRoleArn; enable ECS Exec and include script/cat in the container image.
+            Description: Already attached to TaskRoleArn; enable ECS Exec and include script/cat in the container image.
             Value:
               Ref: EcsExecTaskAccess
           EcsExecOperatorAccessArn:
@@ -2263,7 +2296,7 @@
             Value:
               Ref: ActionLogs
           ExecLogGroupName:
-            Description: ECS Exec transcripts; enable Exec on the service/task and grant the task role log-write and SSM channel permissions.
+            Description: ECS Exec transcripts; enable Exec on the service/task and use TaskRoleArn for the required permissions.
             Value:
               Ref: ExecLogs
           TaskLogGroupName:

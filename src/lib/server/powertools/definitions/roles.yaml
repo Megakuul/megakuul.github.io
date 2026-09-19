@@ -411,13 +411,17 @@
               ManagedPolicyName:
                 Fn::Sub: ${RoleName}-permissions
               Path: /powertools/
-              Description: Application permissions for this role.
+              Description: ECS Exec SSM channels and application permissions for this task role.
               PolicyDocument:
                 Version: 2012-10-17
                 Statement:
-                  - Sid: EmptyPermissions
-                    Effect: Deny
-                    NotAction: '*'
+                  - Sid: EcsExecChannels
+                    Effect: Allow
+                    Action:
+                      - ssmmessages:CreateControlChannel
+                      - ssmmessages:CreateDataChannel
+                      - ssmmessages:OpenControlChannel
+                      - ssmmessages:OpenDataChannel
                     Resource: '*'
               Roles:
                 - Ref: Role
