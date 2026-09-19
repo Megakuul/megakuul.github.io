@@ -863,53 +863,45 @@ function rds() {
   const p = base(
     'rds',
     'RDS PostgreSQL',
-    'Private Multi-AZ PostgreSQL; 14-day backups, encryption, deletion protection, logs and monitoring. Master secret rotates automatically. Attach the output client security group to VPC clients; TCP 5432, not the Aurora Data API.',
+    'Private Multi-AZ PostgreSQL in your VPC; 14-day backups, encryption, deletion protection, logs and monitoring. Master secret rotates automatically. Allow TCP 5432 from your existing application security group on the output database security group.',
+  );
+  p.env!.push(
+    { name: 'VPC_ID', example: 'vpc-0123456789abcdef0', required: true },
+    {
+      name: 'SUBNET_IDS',
+      example: 'subnet-0123456789abcdef0,subnet-0123456789abcdef1',
+      required: true,
+      hint: 'Existing private subnets in this VPC, spanning at least two Availability Zones.',
+    },
   );
   const t = p.template,
     r = t.Resources;
   t.Parameters.Name.AllowedPattern = '(?!.*--)[a-z][a-z0-9-]{0,22}[a-z0-9]';
-  r.Vpc = resource('AWS::EC2::VPC', {
-    CidrBlock: '10.61.0.0/16',
-    EnableDnsSupport: true,
-    EnableDnsHostnames: true,
-    Tags: namedTags,
-  });
-  for (const i of [0, 1])
-    r[`Subnet${i}`] = resource('AWS::EC2::Subnet', {
-      VpcId: ref('Vpc'),
-      CidrBlock: `10.61.${i}.0/24`,
-      AvailabilityZone: { 'Fn::Select': [i, { 'Fn::GetAZs': '' }] },
-      MapPublicIpOnLaunch: false,
-      Tags: tags,
-    });
-  r.ClientGroup = resource('AWS::EC2::SecurityGroup', {
-    VpcId: ref('Vpc'),
-    GroupDescription: 'Attach to authorized database clients',
-    SecurityGroupIngress: [],
-    SecurityGroupEgress: [
-      { IpProtocol: 'tcp', FromPort: 5432, ToPort: 5432, CidrIp: '10.61.0.0/16' },
-    ],
-    Tags: tags,
-  });
+  t.Parameters.VpcId = { Type: 'AWS::EC2::VPC::Id' };
+  t.Parameters.SubnetIds = { Type: 'List<AWS::EC2::Subnet::Id>' };
+  t.Rules = {
+    SubnetsInVpc: {
+      Assertions: [
+        {
+          Assert: {
+            'Fn::EachMemberEquals': [{ 'Fn::ValueOf': ['SubnetIds', 'VpcId'] }, ref('VpcId')],
+          },
+          AssertDescription: 'All subnets must belong to VPC_ID.',
+        },
+      ],
+    },
+  };
   r.DatabaseGroup = resource('AWS::EC2::SecurityGroup', {
-    VpcId: ref('Vpc'),
-    GroupDescription: 'PostgreSQL from authorized clients only',
-    SecurityGroupIngress: [
-      {
-        IpProtocol: 'tcp',
-        FromPort: 5432,
-        ToPort: 5432,
-        SourceSecurityGroupId: ref('ClientGroup'),
-      },
-    ],
-    SecurityGroupEgress: [
-      { IpProtocol: 'tcp', FromPort: 443, ToPort: 443, CidrIp: '10.61.0.0/16' },
-    ],
-    Tags: tags,
+    VpcId: ref('VpcId'),
+    GroupDescription: 'Database; allow TCP 5432 from authorized application security groups',
+    SecurityGroupIngress: [],
+    // Suppress default allow-all egress; replies to allowed ingress are stateful.
+    SecurityGroupEgress: [{ IpProtocol: 'tcp', FromPort: 1, ToPort: 1, CidrIp: '127.0.0.1/32' }],
+    Tags: namedTags,
   });
   r.SubnetGroup = resource('AWS::RDS::DBSubnetGroup', {
     DBSubnetGroupDescription: 'Private database subnets',
-    SubnetIds: [ref('Subnet0'), ref('Subnet1')],
+    SubnetIds: ref('SubnetIds'),
     Tags: tags,
   });
   r.Parameters = resource('AWS::RDS::DBParameterGroup', {
@@ -986,32 +978,6 @@ function rds() {
       UpdateReplacePolicy: 'Snapshot',
     },
   );
-  r.FlowLogs = logs('vpc');
-  r.FlowRole = role('vpc-flow-logs.amazonaws.com', [
-    allow(
-      ['logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams'],
-      att('FlowLogs'),
-    ),
-    allow('logs:DescribeLogGroups', '*'),
-  ]);
-  r.FlowRole.Properties!.AssumeRolePolicyDocument.Statement[0].Condition = {
-    StringEquals: { 'aws:SourceAccount': ref('AWS::AccountId') },
-    ArnLike: {
-      'aws:SourceArn': sub(
-        'arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:vpc-flow-log/*',
-      ),
-    },
-  };
-  r.FlowLog = resource('AWS::EC2::FlowLog', {
-    ResourceType: 'VPC',
-    ResourceId: ref('Vpc'),
-    TrafficType: 'ALL',
-    LogDestinationType: 'cloud-watch-logs',
-    LogGroupName: ref('FlowLogs'),
-    DeliverLogsPermissionArn: att('FlowRole'),
-    MaxAggregationInterval: 60,
-    Tags: tags,
-  });
   for (const [id, metric, threshold, comparison] of [
     ['CpuAlarm', 'CPUUtilization', 80, 'GreaterThanThreshold'],
     ['StorageAlarm', 'FreeStorageSpace', 5368709120, 'LessThanThreshold'],
@@ -1045,8 +1011,8 @@ function rds() {
     Port: { Value: att('Database', 'Endpoint.Port') },
     MasterSecretArn: { Value: att('Database', 'MasterUserSecret.SecretArn') },
     SecretReadAccessArn: { Value: ref('SecretReadAccess') },
-    VpcId: { Value: ref('Vpc') },
-    ClientSecurityGroup: { Value: ref('ClientGroup') },
+    VpcId: { Value: ref('VpcId') },
+    DatabaseSecurityGroup: { Value: ref('DatabaseGroup') },
   };
   return p;
 }
@@ -1055,7 +1021,7 @@ function efs() {
   const p = base(
     'efs',
     'EFS',
-    'Encrypted Regional EFS with automatic backups, TLS/IAM enforcement and a closed security group. Retains data. Create mount targets and allow client NFS access when configuring the workload; attach the optional access policy to its role.',
+    'Encrypted Regional EFS with automatic backups, TLS enforcement and a closed security group. Retains data. Create mount targets, allow client NFS access and attach the optional IAM access policy to the workload role. The access point is optional.',
   );
   p.env!.push({ name: 'VPC_ID', example: 'vpc-0123456789abcdef0', required: true });
   const t = p.template,
@@ -1081,14 +1047,6 @@ function efs() {
       FileSystemTags: namedTags,
       FileSystemPolicy: policy(
         deny('RequireTLS', clientActions, { Bool: { 'aws:SecureTransport': 'false' } }),
-        deny('RequireIAM', clientActions, { Null: { 'aws:PrincipalArn': 'true' } }),
-        deny('RequireAccessPoint', clientActions, {
-          Null: { 'elasticfilesystem:AccessPointArn': 'true' },
-        }),
-        deny('RequireMountTarget', clientActions, {
-          Bool: { 'elasticfilesystem:AccessedViaMountTarget': 'false' },
-        }),
-        deny('DenyRoot', 'elasticfilesystem:ClientRootAccess'),
       ),
     },
     retain,
@@ -1118,9 +1076,9 @@ function efs() {
     [
       'EfsReadAccess',
       ['elasticfilesystem:ClientMount'],
-      'Read this file system through its access point.',
+      'Read this file system; access point optional.',
     ],
-    ['EfsWriteAccess', clientActions, 'Read and write this file system through its access point.'],
+    ['EfsWriteAccess', clientActions, 'Read and write this file system; access point optional.'],
   ] as const) {
     r[id] = resource(
       'AWS::IAM::ManagedPolicy',
@@ -1131,11 +1089,7 @@ function efs() {
           Action: actions,
           Resource: att('FileSystem'),
           Condition: {
-            StringEquals: { 'elasticfilesystem:AccessPointArn': att('AccessPoint', 'Arn') },
-            Bool: {
-              'aws:SecureTransport': 'true',
-              'elasticfilesystem:AccessedViaMountTarget': 'true',
-            },
+            Bool: { 'aws:SecureTransport': 'true' },
           },
         }),
       },
@@ -1162,7 +1116,7 @@ function vpc(publicSubnets: boolean) {
   const ipv4Prefix = publicSubnets ? '10.0' : '10.100';
   const p = base(
     publicSubnets ? 'vpc-public-private' : 'vpc-private',
-    publicSubnets ? 'VPC · public + private (3 AZs)' : 'VPC · private only (3 AZs)',
+    publicSubnets ? 'VPC public + private (3 AZs)' : 'VPC private only (3 AZs)',
     `${publicSubnets ? 'Three public + three private subnets, IGW and automatic regional NAT.' : 'Three isolated private subnets; no internet gateway or NAT.'} DNS, DNSSEC, flow/query logs and S3/DynamoDB gateways included. Requires three available AZs. Enable Network Address Usage metrics separately via CLI or console; CloudFormation does not expose it.`,
   );
   p.env!.push({

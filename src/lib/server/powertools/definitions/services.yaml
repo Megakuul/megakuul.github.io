@@ -121,17 +121,22 @@
           required: true
           type: string
           pattern: '[a-z][a-z0-9-]{2,31}'
-          hint: 'Deployed live stage + Lambda: GET / and POST /items. IAM/SigV4 required; attach the output invoke policy to callers. Access/Lambda logs, detailed metrics, throttling and alarms. HTTP APIs have no execution logs, API X-Ray or WAF; Lambda tracing is enabled.'
+          hint: Empty HTTP API with encrypted access logs, metrics and throttling. No routes, integrations or backend. Configure authentication on every route you add. Optional Lambda authorizer starts deny-all; replace its code before use.
         - name: TAG_KEY
           example: Project
           required: true
         - name: TAG_VALUE
           example: my-app
           required: true
+        - name: ENABLE_LAMBDA_AUTHORIZER
+          example: 'true'
+          required: false
+          default: 'false'
+          hint: Create a REQUEST authorizer and deny-all Lambda placeholder. Replace its code and explicitly attach the authorizer to your routes/methods; no authentication is applied automatically.
       templateName: http-api
       template:
         AWSTemplateFormatVersion: 2010-09-09
-        Description: 'Deployed live stage + Lambda: GET / and POST /items. IAM/SigV4 required; attach the output invoke policy to callers. Access/Lambda logs, detailed metrics, throttling and alarms. HTTP APIs have no execution logs, API X-Ray or WAF; Lambda tracing is enabled.'
+        Description: Empty HTTP API with encrypted access logs, metrics and throttling. No routes, integrations or backend. Configure authentication on every route you add. Optional Lambda authorizer starts deny-all; replace its code before use.
         Parameters:
           Name:
             Type: String
@@ -142,6 +147,12 @@
           TagValue:
             Type: String
             Default: powertools
+          EnableLambdaAuthorizer:
+            Type: String
+            Default: 'false'
+            AllowedValues:
+              - 'true'
+              - 'false'
         Resources:
           AccessLogs:
             Type: AWS::Logs::LogGroup
@@ -157,107 +168,6 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
-          BackendLogs:
-            Type: AWS::Logs::LogGroup
-            DeletionPolicy: Retain
-            UpdateReplacePolicy: Retain
-            Properties:
-              LogGroupName:
-                Fn::Sub: /aws/lambda/${Name}-http-api
-              RetentionInDays: 30
-              DeletionProtectionEnabled: true
-              Tags:
-                - Key:
-                    Ref: TagKey
-                  Value:
-                    Ref: TagValue
-          BackendRole:
-            Type: AWS::IAM::Role
-            Properties:
-              AssumeRolePolicyDocument:
-                Version: 2012-10-17
-                Statement:
-                  - Effect: Allow
-                    Principal:
-                      Service: lambda.amazonaws.com
-                    Action: sts:AssumeRole
-              Policies:
-                - PolicyName: LogsAndTracing
-                  PolicyDocument:
-                    Version: 2012-10-17
-                    Statement:
-                      - Effect: Allow
-                        Action:
-                          - logs:CreateLogStream
-                          - logs:PutLogEvents
-                        Resource:
-                          Fn::GetAtt:
-                            - BackendLogs
-                            - Arn
-                      - Effect: Allow
-                        Action:
-                          - xray:PutTraceSegments
-                          - xray:PutTelemetryRecords
-                        Resource: '*'
-              Tags:
-                - Key:
-                    Ref: TagKey
-                  Value:
-                    Ref: TagValue
-          Backend:
-            Type: AWS::Lambda::Function
-            Properties:
-              FunctionName:
-                Fn::Sub: ${Name}-http-api
-              Runtime: nodejs24.x
-              Handler: index.handler
-              Role:
-                Fn::GetAtt:
-                  - BackendRole
-                  - Arn
-              Code:
-                ZipFile: |-
-                  exports.handler = async (event, context) => {
-                    const method = event.requestContext?.http?.method ?? event.httpMethod;
-                    const path = event.resource ?? event.routeKey?.split(" ")[1] ?? event.rawPath ?? event.path;
-                    const reply = (statusCode, body) => {
-                      console.info({ requestId: context.awsRequestId, method, statusCode });
-                      return { statusCode, headers: {
-                        "content-type": "application/json", "cache-control": "no-store",
-                        "x-content-type-options": "nosniff", "strict-transport-security": "max-age=31536000"
-                      }, body: JSON.stringify(body) };
-                    };
-                    if (method === "GET" && path === "/") return reply(200, { status: "ok" });
-                    if (method !== "POST" || path !== "/items") return reply(404, { message: "Not found" });
-                    const type = Object.entries(event.headers ?? {}).find(([key]) => key.toLowerCase() === "content-type")?.[1];
-                    if (!type || type.split(";")[0].trim().toLowerCase() !== "application/json")
-                      return reply(415, { message: "Use application/json" });
-                    const raw = event.isBase64Encoded ? Buffer.from(event.body ?? "", "base64").toString("utf8") : event.body ?? "";
-                    if (Buffer.byteLength(raw) > 4096) return reply(413, { message: "Body too large" });
-                    let body;
-                    try { body = JSON.parse(raw); } catch { return reply(400, { message: "Invalid JSON" }); }
-                    if (!body || Array.isArray(body) || typeof body.message !== "string" ||
-                        body.message.length < 1 || body.message.length > 1000 || Object.keys(body).length !== 1)
-                      return reply(400, { message: "Expected message (1-1000 characters)" });
-                    return reply(200, { accepted: true });
-                  };
-              MemorySize: 256
-              Timeout: 10
-              Architectures:
-                - arm64
-              TracingConfig:
-                Mode: Active
-              LoggingConfig:
-                LogFormat: JSON
-                ApplicationLogLevel: INFO
-                SystemLogLevel: INFO
-                LogGroup:
-                  Ref: BackendLogs
-              Tags:
-                - Key:
-                    Ref: TagKey
-                  Value:
-                    Ref: TagValue
           Api:
             Type: AWS::ApiGatewayV2::Api
             Properties:
@@ -265,66 +175,11 @@
                 Ref: Name
               ProtocolType: HTTP
               DisableExecuteApiEndpoint: false
-          Integration:
-            Type: AWS::ApiGatewayV2::Integration
-            Properties:
-              ApiId:
-                Ref: Api
-              IntegrationType: AWS_PROXY
-              IntegrationMethod: POST
-              IntegrationUri:
-                Fn::GetAtt:
-                  - Backend
-                  - Arn
-              PayloadFormatVersion: '2.0'
-              TimeoutInMillis: 12000
-          InvokeGet:
-            Type: AWS::Lambda::Permission
-            Properties:
-              FunctionName:
-                Ref: Backend
-              Action: lambda:InvokeFunction
-              Principal: apigateway.amazonaws.com
-              SourceAccount:
-                Ref: AWS::AccountId
-              SourceArn:
-                Fn::Sub: arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/live/GET/
-          InvokePost:
-            Type: AWS::Lambda::Permission
-            Properties:
-              FunctionName:
-                Ref: Backend
-              Action: lambda:InvokeFunction
-              Principal: apigateway.amazonaws.com
-              SourceAccount:
-                Ref: AWS::AccountId
-              SourceArn:
-                Fn::Sub: arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/live/POST/items
-          GetRoute:
-            Type: AWS::ApiGatewayV2::Route
-            Properties:
-              ApiId:
-                Ref: Api
-              RouteKey: GET /
-              AuthorizationType: AWS_IAM
-              Target:
-                Fn::Sub: integrations/${Integration}
-          PostRoute:
-            Type: AWS::ApiGatewayV2::Route
-            Properties:
-              ApiId:
-                Ref: Api
-              RouteKey: POST /items
-              AuthorizationType: AWS_IAM
-              Target:
-                Fn::Sub: integrations/${Integration}
+              Tags:
+                Name:
+                  Ref: Name
           Stage:
             Type: AWS::ApiGatewayV2::Stage
-            DependsOn:
-              - GetRoute
-              - PostRoute
-              - InvokeGet
-              - InvokePost
             Properties:
               ApiId:
                 Ref: Api
@@ -338,18 +193,9 @@
                 DetailedMetricsEnabled: true
                 ThrottlingBurstLimit: 20
                 ThrottlingRateLimit: 10
-          InvokePolicy:
-            Type: AWS::IAM::ManagedPolicy
-            Properties:
-              Description: Attach to callers; sign requests with AWS SigV4.
-              PolicyDocument:
-                Version: 2012-10-17
-                Statement:
-                  - Effect: Allow
-                    Action: execute-api:Invoke
-                    Resource:
-                      - Fn::Sub: arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/live/GET/
-                      - Fn::Sub: arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/live/POST/items
+              Tags:
+                Name:
+                  Ref: Name
           ServerErrors:
             Type: AWS::CloudWatch::Alarm
             Properties:
@@ -422,100 +268,13 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
-          BackendErrors:
-            Type: AWS::CloudWatch::Alarm
-            Properties:
-              AlarmDescription: Lambda errors or throttles
-              Metrics:
-                - Id: failures
-                  Expression: errors + throttles
-                  Label: Errors and throttles
-                  ReturnData: true
-                - Id: errors
-                  MetricStat:
-                    Metric:
-                      Namespace: AWS/Lambda
-                      MetricName: Errors
-                      Dimensions:
-                        - Name: FunctionName
-                          Value:
-                            Ref: Backend
-                    Period: 60
-                    Stat: Sum
-                  ReturnData: false
-                - Id: throttles
-                  MetricStat:
-                    Metric:
-                      Namespace: AWS/Lambda
-                      MetricName: Throttles
-                      Dimensions:
-                        - Name: FunctionName
-                          Value:
-                            Ref: Backend
-                    Period: 60
-                    Stat: Sum
-                  ReturnData: false
-              EvaluationPeriods: 1
-              Threshold: 0
-              ComparisonOperator: GreaterThanThreshold
-              TreatMissingData: notBreaching
-              Tags:
-                - Key:
-                    Ref: TagKey
-                  Value:
-                    Ref: TagValue
-        Outputs:
-          ApiUrl:
-            Description: IAM/SigV4 GET /; POST /items with application/json body {"message":"hello"}.
-            Value:
-              Fn::Sub: https://${Api}.execute-api.${AWS::Region}.${AWS::URLSuffix}/live/
-          InvokePolicyArn:
-            Description: Attach to the IAM caller. API keys are not authentication.
-            Value:
-              Ref: InvokePolicy
-          BackendName:
-            Value:
-              Ref: Backend
-          AccessLogGroup:
-            Value:
-              Ref: AccessLogs
-    - id: service-rest-api
-      title: REST API
-      env:
-        - name: NAME
-          example: my-rest-api
-          required: true
-          type: string
-          pattern: '[a-z][a-z0-9-]{2,31}'
-          hint: 'Deployed live stage + Lambda: GET / and POST /items. IAM/SigV4 required; attach the output invoke policy. Access/execution/Lambda/WAF logs, X-Ray, validation, throttling and alarms. Payload tracing and WAF request sampling stay off to protect secrets. Configures the regional REST logging role; manage that account setting in only one stack per region.'
-        - name: TAG_KEY
-          example: Project
-          required: true
-        - name: TAG_VALUE
-          example: my-app
-          required: true
-      templateName: rest-api
-      template:
-        AWSTemplateFormatVersion: 2010-09-09
-        Description: 'Deployed live stage + Lambda: GET / and POST /items. IAM/SigV4 required; attach the output invoke policy. Access/execution/Lambda/WAF logs, X-Ray, validation, throttling and alarms. Payload tracing and WAF request sampling stay off to protect secrets. Configures the regional REST logging role; manage that account setting in only one stack per region.'
-        Parameters:
-          Name:
-            Type: String
-            AllowedPattern: '[a-z][a-z0-9-]{2,31}'
-          TagKey:
-            Type: String
-            Default: Project
-          TagValue:
-            Type: String
-            Default: powertools
-        Resources:
-          AccessLogs:
+          AuthorizerLogs:
             Type: AWS::Logs::LogGroup
             DeletionPolicy: Retain
             UpdateReplacePolicy: Retain
             Properties:
               LogGroupName:
-                Fn::Sub: /aws/apigateway/${Name}/rest-api/access
+                Fn::Sub: /aws/lambda/${Name}-http-api-authorizer
               RetentionInDays: 30
               DeletionProtectionEnabled: true
               Tags:
@@ -523,21 +282,8 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
-          BackendLogs:
-            Type: AWS::Logs::LogGroup
-            DeletionPolicy: Retain
-            UpdateReplacePolicy: Retain
-            Properties:
-              LogGroupName:
-                Fn::Sub: /aws/lambda/${Name}-rest-api
-              RetentionInDays: 30
-              DeletionProtectionEnabled: true
-              Tags:
-                - Key:
-                    Ref: TagKey
-                  Value:
-                    Ref: TagValue
-          BackendRole:
+            Condition: CreateLambdaAuthorizer
+          AuthorizerRole:
             Type: AWS::IAM::Role
             Properties:
               AssumeRolePolicyDocument:
@@ -558,7 +304,7 @@
                           - logs:PutLogEvents
                         Resource:
                           Fn::GetAtt:
-                            - BackendLogs
+                            - AuthorizerLogs
                             - Arn
                       - Effect: Allow
                         Action:
@@ -570,45 +316,24 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
-          Backend:
+            Condition: CreateLambdaAuthorizer
+          AuthorizerFunction:
             Type: AWS::Lambda::Function
             Properties:
               FunctionName:
-                Fn::Sub: ${Name}-rest-api
+                Fn::Sub: ${Name}-http-api-authorizer
               Runtime: nodejs24.x
               Handler: index.handler
               Role:
                 Fn::GetAtt:
-                  - BackendRole
+                  - AuthorizerRole
                   - Arn
               Code:
                 ZipFile: |-
-                  exports.handler = async (event, context) => {
-                    const method = event.requestContext?.http?.method ?? event.httpMethod;
-                    const path = event.resource ?? event.routeKey?.split(" ")[1] ?? event.rawPath ?? event.path;
-                    const reply = (statusCode, body) => {
-                      console.info({ requestId: context.awsRequestId, method, statusCode });
-                      return { statusCode, headers: {
-                        "content-type": "application/json", "cache-control": "no-store",
-                        "x-content-type-options": "nosniff", "strict-transport-security": "max-age=31536000"
-                      }, body: JSON.stringify(body) };
-                    };
-                    if (method === "GET" && path === "/") return reply(200, { status: "ok" });
-                    if (method !== "POST" || path !== "/items") return reply(404, { message: "Not found" });
-                    const type = Object.entries(event.headers ?? {}).find(([key]) => key.toLowerCase() === "content-type")?.[1];
-                    if (!type || type.split(";")[0].trim().toLowerCase() !== "application/json")
-                      return reply(415, { message: "Use application/json" });
-                    const raw = event.isBase64Encoded ? Buffer.from(event.body ?? "", "base64").toString("utf8") : event.body ?? "";
-                    if (Buffer.byteLength(raw) > 4096) return reply(413, { message: "Body too large" });
-                    let body;
-                    try { body = JSON.parse(raw); } catch { return reply(400, { message: "Invalid JSON" }); }
-                    if (!body || Array.isArray(body) || typeof body.message !== "string" ||
-                        body.message.length < 1 || body.message.length > 1000 || Object.keys(body).length !== 1)
-                      return reply(400, { message: "Expected message (1-1000 characters)" });
-                    return reply(200, { accepted: true });
-                  };
+                  // Fail closed until workload-specific authorization is implemented.
+                  exports.handler = async () => ({ isAuthorized: false });
               MemorySize: 256
-              Timeout: 10
+              Timeout: 5
               Architectures:
                 - arm64
               TracingConfig:
@@ -618,7 +343,128 @@
                 ApplicationLogLevel: INFO
                 SystemLogLevel: INFO
                 LogGroup:
-                  Ref: BackendLogs
+                  Ref: AuthorizerLogs
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+            Condition: CreateLambdaAuthorizer
+          Authorizer:
+            Type: AWS::ApiGatewayV2::Authorizer
+            Condition: CreateLambdaAuthorizer
+            Properties:
+              Name:
+                Fn::Sub: ${Name}-authorizer
+              ApiId:
+                Ref: Api
+              AuthorizerType: REQUEST
+              IdentitySource:
+                - $request.header.Authorization
+              AuthorizerResultTtlInSeconds: 0
+              AuthorizerUri:
+                Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthorizerFunction.Arn}/invocations
+              AuthorizerPayloadFormatVersion: '2.0'
+              EnableSimpleResponses: true
+          AuthorizerPermission:
+            Type: AWS::Lambda::Permission
+            Condition: CreateLambdaAuthorizer
+            Properties:
+              FunctionName:
+                Ref: AuthorizerFunction
+              Action: lambda:InvokeFunction
+              Principal: apigateway.amazonaws.com
+              SourceAccount:
+                Ref: AWS::AccountId
+              SourceArn:
+                Fn::Sub: arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/authorizers/${Authorizer}
+        Outputs:
+          ApiUrl:
+            Description: No routes or integrations are provisioned.
+            Value:
+              Fn::Sub: https://${Api}.execute-api.${AWS::Region}.${AWS::URLSuffix}/live/
+          AccessLogGroup:
+            Value:
+              Ref: AccessLogs
+          ApiId:
+            Value:
+              Ref: Api
+          AuthorizerId:
+            Condition: CreateLambdaAuthorizer
+            Description: Attach explicitly to methods/routes using CUSTOM authorization after replacing the deny-all Lambda code.
+            Value:
+              Ref: Authorizer
+          AuthorizerFunctionArn:
+            Condition: CreateLambdaAuthorizer
+            Value:
+              Fn::GetAtt:
+                - AuthorizerFunction
+                - Arn
+        Conditions:
+          CreateLambdaAuthorizer:
+            Fn::Equals:
+              - Ref: EnableLambdaAuthorizer
+              - 'true'
+      cli: false
+    - id: service-rest-api
+      title: REST API
+      env:
+        - name: NAME
+          example: my-rest-api
+          required: true
+          type: string
+          pattern: '[a-z][a-z0-9-]{2,31}'
+          hint: Empty regional REST API. No methods, integrations or backend. Add your methods and deployment, then update DeploymentId to create the live stage with encrypted logs, X-Ray, throttling and WAF. Configure method authentication. Regional logging account setting must have one owner per Region.
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: my-app
+          required: true
+        - name: ENABLE_LAMBDA_AUTHORIZER
+          example: 'true'
+          required: false
+          default: 'false'
+          hint: Create a REQUEST authorizer and deny-all Lambda placeholder. Replace its code and explicitly attach the authorizer to your routes/methods; no authentication is applied automatically.
+        - name: DEPLOYMENT_ID
+          example: abc123
+          required: false
+          default: ''
+          hint: Leave empty initially. After adding your own methods/integrations and creating a deployment, update this stack parameter to enable the secured live stage.
+      templateName: rest-api
+      template:
+        AWSTemplateFormatVersion: 2010-09-09
+        Description: Empty regional REST API. No methods, integrations or backend. Add your methods and deployment, then update DeploymentId to create the live stage with encrypted logs, X-Ray, throttling and WAF. Configure method authentication. Regional logging account setting must have one owner per Region.
+        Parameters:
+          Name:
+            Type: String
+            AllowedPattern: '[a-z][a-z0-9-]{2,31}'
+          TagKey:
+            Type: String
+            Default: Project
+          TagValue:
+            Type: String
+            Default: powertools
+          EnableLambdaAuthorizer:
+            Type: String
+            Default: 'false'
+            AllowedValues:
+              - 'true'
+              - 'false'
+          DeploymentId:
+            Type: String
+            Default: ''
+            Description: Existing deployment of this API; leave empty until you add methods and create a deployment.
+        Resources:
+          AccessLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /aws/apigateway/${Name}/rest-api/access
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
               Tags:
                 - Key:
                     Ref: TagKey
@@ -635,104 +481,11 @@
               SecurityPolicy: SecurityPolicy_TLS13_1_2_PFS_PQ_2025_09
               EndpointAccessMode: STRICT
               DisableExecuteApiEndpoint: false
-              FailOnWarnings: true
-              Mode: overwrite
-              Body:
-                swagger: '2.0'
-                info:
-                  title:
-                    Ref: Name
-                  version: '1.0'
-                schemes:
-                  - https
-                produces:
-                  - application/json
-                securityDefinitions:
-                  sigv4:
-                    type: apiKey
-                    name: Authorization
-                    in: header
-                    x-amazon-apigateway-authtype: awsSigv4
-                security:
-                  - sigv4: []
-                x-amazon-apigateway-request-validators:
-                  Validate:
-                    validateRequestBody: true
-                    validateRequestParameters: true
-                x-amazon-apigateway-request-validator: Validate
-                definitions:
-                  Message:
-                    type: object
-                    required:
-                      - message
-                    additionalProperties: false
-                    properties:
-                      message:
-                        type: string
-                        minLength: 1
-                        maxLength: 1000
-                paths:
-                  /:
-                    get:
-                      responses:
-                        '200':
-                          description: OK
-                      x-amazon-apigateway-integration:
-                        type: aws_proxy
-                        httpMethod: POST
-                        uri:
-                          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Backend.Arn}/invocations
-                        timeoutInMillis: 12000
-                  /items:
-                    post:
-                      consumes:
-                        - application/json
-                      parameters:
-                        - name: body
-                          in: body
-                          required: true
-                          schema:
-                            $ref: '#/definitions/Message'
-                      responses:
-                        '200':
-                          description: Accepted
-                        '400':
-                          description: Invalid request
-                      x-amazon-apigateway-integration:
-                        type: aws_proxy
-                        httpMethod: POST
-                        uri:
-                          Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Backend.Arn}/invocations
-                        timeoutInMillis: 12000
-                x-amazon-apigateway-security-policy: SecurityPolicy_TLS13_1_2_PFS_PQ_2025_09
-                x-amazon-apigateway-endpoint-access-mode: STRICT
               Tags:
                 - Key:
                     Ref: TagKey
                   Value:
                     Ref: TagValue
-          InvokeGet:
-            Type: AWS::Lambda::Permission
-            Properties:
-              FunctionName:
-                Ref: Backend
-              Action: lambda:InvokeFunction
-              Principal: apigateway.amazonaws.com
-              SourceAccount:
-                Ref: AWS::AccountId
-              SourceArn:
-                Fn::Sub: arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/live/GET/
-          InvokePost:
-            Type: AWS::Lambda::Permission
-            Properties:
-              FunctionName:
-                Ref: Backend
-              Action: lambda:InvokeFunction
-              Principal: apigateway.amazonaws.com
-              SourceAccount:
-                Ref: AWS::AccountId
-              SourceArn:
-                Fn::Sub: arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/live/POST/items
           ExecutionLogs:
             Type: AWS::Logs::LogGroup
             DeletionPolicy: Retain
@@ -747,6 +500,7 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
+            Condition: HasDeployment
           LoggingRole:
             Type: AWS::IAM::Role
             DeletionPolicy: Retain
@@ -783,6 +537,7 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
+            Condition: HasDeployment
           LoggingAccount:
             Type: AWS::ApiGateway::Account
             DeletionPolicy: Retain
@@ -792,26 +547,15 @@
                 Fn::GetAtt:
                   - LoggingRole
                   - Arn
-          DeploymentV1:
-            Type: AWS::ApiGateway::Deployment
-            DependsOn:
-              - InvokeGet
-              - InvokePost
-            Properties:
-              RestApiId:
-                Ref: Api
-              Description: Initial routes. Change this resource logical ID when updating the OpenAPI definition.
+            Condition: HasDeployment
           Stage:
             Type: AWS::ApiGateway::Stage
-            DependsOn:
-              - LoggingAccount
-              - ExecutionLogs
             Properties:
               RestApiId:
                 Ref: Api
               StageName: live
               DeploymentId:
-                Ref: DeploymentV1
+                Ref: DeploymentId
               TracingEnabled: true
               CacheClusterEnabled: false
               AccessLogSetting:
@@ -833,6 +577,10 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
+            Condition: HasDeployment
+            DependsOn:
+              - LoggingAccount
+              - ExecutionLogs
           WebACL:
             Type: AWS::WAFv2::WebACL
             Properties:
@@ -957,18 +705,7 @@
                   - Arn
               ResourceArn:
                 Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}::/restapis/${Api}/stages/live
-          InvokePolicy:
-            Type: AWS::IAM::ManagedPolicy
-            Properties:
-              Description: Attach to callers; sign requests with AWS SigV4.
-              PolicyDocument:
-                Version: 2012-10-17
-                Statement:
-                  - Effect: Allow
-                    Action: execute-api:Invoke
-                    Resource:
-                      - Fn::Sub: arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/live/GET/
-                      - Fn::Sub: arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/live/POST/items
+            Condition: HasDeployment
           ServerErrors:
             Type: AWS::CloudWatch::Alarm
             Properties:
@@ -993,6 +730,7 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
+            Condition: HasDeployment
           ClientErrors:
             Type: AWS::CloudWatch::Alarm
             Properties:
@@ -1017,6 +755,7 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
+            Condition: HasDeployment
           Latency:
             Type: AWS::CloudWatch::Alarm
             Properties:
@@ -1041,63 +780,164 @@
                     Ref: TagKey
                   Value:
                     Ref: TagValue
-          BackendErrors:
-            Type: AWS::CloudWatch::Alarm
+            Condition: HasDeployment
+          AuthorizerLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
             Properties:
-              AlarmDescription: Lambda errors or throttles
-              Metrics:
-                - Id: failures
-                  Expression: errors + throttles
-                  Label: Errors and throttles
-                  ReturnData: true
-                - Id: errors
-                  MetricStat:
-                    Metric:
-                      Namespace: AWS/Lambda
-                      MetricName: Errors
-                      Dimensions:
-                        - Name: FunctionName
-                          Value:
-                            Ref: Backend
-                    Period: 60
-                    Stat: Sum
-                  ReturnData: false
-                - Id: throttles
-                  MetricStat:
-                    Metric:
-                      Namespace: AWS/Lambda
-                      MetricName: Throttles
-                      Dimensions:
-                        - Name: FunctionName
-                          Value:
-                            Ref: Backend
-                    Period: 60
-                    Stat: Sum
-                  ReturnData: false
-              EvaluationPeriods: 1
-              Threshold: 0
-              ComparisonOperator: GreaterThanThreshold
-              TreatMissingData: notBreaching
+              LogGroupName:
+                Fn::Sub: /aws/lambda/${Name}-rest-api-authorizer
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
               Tags:
                 - Key:
                     Ref: TagKey
                   Value:
                     Ref: TagValue
+            Condition: CreateLambdaAuthorizer
+          AuthorizerRole:
+            Type: AWS::IAM::Role
+            Properties:
+              AssumeRolePolicyDocument:
+                Version: 2012-10-17
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      Service: lambda.amazonaws.com
+                    Action: sts:AssumeRole
+              Policies:
+                - PolicyName: LogsAndTracing
+                  PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Effect: Allow
+                        Action:
+                          - logs:CreateLogStream
+                          - logs:PutLogEvents
+                        Resource:
+                          Fn::GetAtt:
+                            - AuthorizerLogs
+                            - Arn
+                      - Effect: Allow
+                        Action:
+                          - xray:PutTraceSegments
+                          - xray:PutTelemetryRecords
+                        Resource: '*'
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+            Condition: CreateLambdaAuthorizer
+          AuthorizerFunction:
+            Type: AWS::Lambda::Function
+            Properties:
+              FunctionName:
+                Fn::Sub: ${Name}-rest-api-authorizer
+              Runtime: nodejs24.x
+              Handler: index.handler
+              Role:
+                Fn::GetAtt:
+                  - AuthorizerRole
+                  - Arn
+              Code:
+                ZipFile: |-
+                  // Fail closed until workload-specific authorization is implemented.
+                  exports.handler = async (event) => ({
+                    principalId: "unauthorized",
+                    policyDocument: { Version: "2012-10-17", Statement: [{
+                      Action: "execute-api:Invoke", Effect: "Deny", Resource: event.methodArn
+                    }] }
+                  });
+              MemorySize: 256
+              Timeout: 5
+              Architectures:
+                - arm64
+              TracingConfig:
+                Mode: Active
+              LoggingConfig:
+                LogFormat: JSON
+                ApplicationLogLevel: INFO
+                SystemLogLevel: INFO
+                LogGroup:
+                  Ref: AuthorizerLogs
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
+            Condition: CreateLambdaAuthorizer
+          Authorizer:
+            Type: AWS::ApiGateway::Authorizer
+            Condition: CreateLambdaAuthorizer
+            Properties:
+              Name:
+                Fn::Sub: ${Name}-authorizer
+              RestApiId:
+                Ref: Api
+              Type: REQUEST
+              IdentitySource: method.request.header.Authorization
+              AuthorizerResultTtlInSeconds: 0
+              AuthorizerUri:
+                Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthorizerFunction.Arn}/invocations
+          AuthorizerPermission:
+            Type: AWS::Lambda::Permission
+            Condition: CreateLambdaAuthorizer
+            Properties:
+              FunctionName:
+                Ref: AuthorizerFunction
+              Action: lambda:InvokeFunction
+              Principal: apigateway.amazonaws.com
+              SourceAccount:
+                Ref: AWS::AccountId
+              SourceArn:
+                Fn::Sub: arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/authorizers/${Authorizer}
         Outputs:
           ApiUrl:
-            Description: IAM/SigV4 GET /; POST /items with application/json body {"message":"hello"}.
+            Description: No routes or integrations are provisioned.
             Value:
               Fn::Sub: https://${Api}.execute-api.${AWS::Region}.${AWS::URLSuffix}/live/
-          InvokePolicyArn:
-            Description: Attach to the IAM caller. API keys are not authentication.
-            Value:
-              Ref: InvokePolicy
-          BackendName:
-            Value:
-              Ref: Backend
+            Condition: HasDeployment
           AccessLogGroup:
             Value:
               Ref: AccessLogs
+          ApiId:
+            Value:
+              Ref: Api
+          AuthorizerId:
+            Condition: CreateLambdaAuthorizer
+            Description: Attach explicitly to methods/routes using CUSTOM authorization after replacing the deny-all Lambda code.
+            Value:
+              Ref: Authorizer
+          AuthorizerFunctionArn:
+            Condition: CreateLambdaAuthorizer
+            Value:
+              Fn::GetAtt:
+                - AuthorizerFunction
+                - Arn
+          RootResourceId:
+            Value:
+              Fn::GetAtt:
+                - Api
+                - RootResourceId
+          WebACLArn:
+            Description: Associated with the live stage when DeploymentId is supplied.
+            Value:
+              Fn::GetAtt:
+                - WebACL
+                - Arn
+        Conditions:
+          CreateLambdaAuthorizer:
+            Fn::Equals:
+              - Ref: EnableLambdaAuthorizer
+              - 'true'
+          HasDeployment:
+            Fn::Not:
+              - Fn::Equals:
+                  - Ref: DeploymentId
+                  - ''
+      cli: false
     - id: service-s3
       title: S3
       env:
@@ -1992,7 +1832,7 @@
           example: my-cluster
           required: true
           type: string
-          hint: Fargate cluster; Action Logs, enhanced Insights, KMS-encrypted logs, Exec sessions and storage. Use Linux platform 1.4.0+; output policies provide optional Exec access for task roles and operators.
+          hint: Fargate cluster; automatic Cloud Map HTTP namespace for Service Connect, Action Logs, enhanced Insights, KMS-encrypted logs, Exec sessions and storage. Enable Service Connect on individual services to use the namespace. Use Linux platform 1.4.0+; output policies provide optional Exec access for task roles and operators.
           pattern: '[A-Za-z0-9_-]{1,54}'
         - name: ECR_REPOSITORY
           example: my-app
@@ -2030,7 +1870,7 @@
             UpdateReplacePolicy: Retain
             Properties:
               LogGroupName:
-                Fn::Sub: /aws/ecs/${Name}/tasks
+                Fn::Sub: /ecs/${Name}-execution
               RetentionInDays: 30
               DeletionProtectionEnabled: true
               Tags:
@@ -2080,7 +1920,7 @@
                           - logs:CreateLogStream
                           - logs:PutLogEvents
                         Resource:
-                          Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/ecs/${Name}/tasks:log-stream:*
+                          Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${TaskLogs}:log-stream:*
               Tags:
                 - Key:
                     Ref: TagKey
@@ -2193,6 +2033,9 @@
             DeletionPolicy: Retain
             UpdateReplacePolicy: Retain
             Properties:
+              ServiceConnectDefaults:
+                Namespace:
+                  Ref: Name
               ClusterName:
                 Ref: Name
               Configuration:
@@ -2395,7 +2238,7 @@
                       Fn::Sub: arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task/${Name}/*
         Outputs:
           TaskExecutionRoleArn:
-            Description: Set task definition executionRoleArn to this ARN (not taskRoleArn).
+            Description: Use as executionRoleArn, not taskRoleArn. Writes only to the pre-provisioned TaskLogGroupName; leave awslogs-create-group false.
             Value:
               Fn::GetAtt:
                 - TaskExecutionRole
@@ -2432,6 +2275,10 @@
               Fn::GetAtt:
                 - Cluster
                 - Arn
+          ServiceConnectNamespace:
+            Description: ECS creates this HTTP namespace if absent, or reuses the existing name. Enable Service Connect on your services; this is not a private DNS zone. Namespace lifecycle is separate from the stack.
+            Value:
+              Ref: Name
           EcsRunAccessArn:
             Description: 'Optional policy: Run NAME-prefixed task families in this cluster; pass only NAME-prefixed task roles. Attach to a role, user or group when needed.'
             Value:

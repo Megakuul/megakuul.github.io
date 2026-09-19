@@ -9,8 +9,16 @@ sudo dnf install amazon-efs-utils pip -y
 sudo pip install boto3
 ```
 
-## Mount HELL
+## ECS and EFS with peering is like using Airpods with Android
 
+This is not even funny anymore. Whatever, if you need EFS mount in peered ECS please notice that efs auto-resolve via API does not work because fargate containers do not have botocore installed (#please-migrate-to-go). 
+
+The official workaround is to create a AWS route53 zone associated with the fargate VPC that just maps the efs hostname to its endpoints (I'm going to hurt myself):
+
+Example URL
+```
+fs-03a9036fb58bdfc89.efs.us-east-1.amazonaws.com
+```
 
 ## Policy Dogwater
 

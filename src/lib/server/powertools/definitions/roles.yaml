@@ -235,6 +235,7 @@
         - name: ROLE_NAME
           example: my-app-role
           required: true
+          hint: Creates /ecs/ROLE_NAME with 30-day retention, deletion protection and customer-managed KMS encryption. Use the TaskLogGroupName output as awslogs-group; the role can write only to this group. No awslogs-create-group needed.
         - name: TAG_KEY
           example: Project
           required: true
@@ -247,6 +248,8 @@
         Parameters:
           RoleName:
             Type: String
+            AllowedPattern: '[A-Za-z0-9_.-]{1,64}'
+            ConstraintDescription: Use 1-64 letters, digits, underscores, periods or hyphens; the name is also used in the log group.
           TagKey:
             Type: String
             Default: Project
@@ -254,6 +257,20 @@
             Type: String
             Default: powertools
         Resources:
+          TaskLogs:
+            Type: AWS::Logs::LogGroup
+            DeletionPolicy: Retain
+            UpdateReplacePolicy: Retain
+            Properties:
+              LogGroupName:
+                Fn::Sub: /ecs/${RoleName}
+              RetentionInDays: 30
+              DeletionProtectionEnabled: true
+              Tags:
+                - Key:
+                    Ref: TagKey
+                  Value:
+                    Ref: TagValue
           Role:
             Type: AWS::IAM::Role
             DeletionPolicy: Retain
@@ -276,8 +293,27 @@
                       ArnLike:
                         aws:SourceArn:
                           Fn::Sub: arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*
-              ManagedPolicyArns:
-                - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+              Policies:
+                - PolicyName: ImagePullAndLogs
+                  PolicyDocument:
+                    Version: 2012-10-17
+                    Statement:
+                      - Effect: Allow
+                        Action: ecr:GetAuthorizationToken
+                        Resource: '*'
+                      - Effect: Allow
+                        Action:
+                          - ecr:BatchCheckLayerAvailability
+                          - ecr:GetDownloadUrlForLayer
+                          - ecr:BatchGetImage
+                        Resource:
+                          Fn::Sub: arn:${AWS::Partition}:ecr:*:*:repository/*
+                      - Effect: Allow
+                        Action:
+                          - logs:CreateLogStream
+                          - logs:PutLogEvents
+                        Resource:
+                          Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${TaskLogs}:log-stream:*
               Tags:
                 - Key:
                     Ref: TagKey
@@ -310,6 +346,10 @@
           PolicyArn:
             Value:
               Ref: Permissions
+          TaskLogGroupName:
+            Description: Use as awslogs-group with awslogs-region and awslogs-stream-prefix. Already provisioned; leave awslogs-create-group false.
+            Value:
+              Ref: TaskLogs
     - id: iam-role-ecs-task
       title: ECS Task
       env:

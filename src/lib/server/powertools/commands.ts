@@ -334,6 +334,8 @@ function cfnCommand(
     EcrRepository: 'ECR_REPOSITORY',
     Architecture: 'ARCHITECTURE',
     EnableIpv6: 'ENABLE_IPV6',
+    EnableLambdaAuthorizer: 'ENABLE_LAMBDA_AUTHORIZER',
+    DeploymentId: 'DEPLOYMENT_ID',
   };
   const parameterNames = Object.keys(template.Parameters).sort(
     (a, b) => Number(!a.startsWith('Tag')) - Number(!b.startsWith('Tag')),
@@ -346,7 +348,11 @@ function cfnCommand(
           ? '${ARCHITECTURE:-x86_64}'
           : key === 'EnableIpv6'
             ? '${ENABLE_IPV6:-false}'
-            : `\${${envParams[key]}:?Set ${envParams[key]}}`;
+            : key === 'EnableLambdaAuthorizer'
+              ? '${ENABLE_LAMBDA_AUTHORIZER:-false}'
+              : key === 'DeploymentId'
+                ? '${DEPLOYMENT_ID:-}'
+                : `\${${envParams[key]}:?Set ${envParams[key]}}`;
     if (!envParams[key] && key !== 'RoleArn') throw Error('Unexpected bootstrap parameter: ' + key);
     return `ParameterKey=${key},ParameterValue="${['GroupNames', 'SubnetIds'].includes(key) ? "'" + value + "'" : value}"`;
   });
@@ -926,6 +932,9 @@ function cliSteps(template: CloudFormationTemplate, skip: string[] = []) {
       case 'AWS::ECS::Cluster':
         request('ecs', 'create-cluster', {
           clusterName: n,
+          serviceConnectDefaults: p.ServiceConnectDefaults
+            ? { namespace: p.ServiceConnectDefaults.Namespace }
+            : undefined,
           configuration: {
             managedStorageConfiguration: p.Configuration.ManagedStorageConfiguration
               ? {

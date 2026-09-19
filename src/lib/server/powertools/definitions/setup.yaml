@@ -2,39 +2,22 @@
   title: Setup
   recipes:
     - id: ecs-account-setup
-      title: ECS · Account defaults
+      title: ECS Account Defaults
       env:
         - name: REGION
           example: eu-west-1
           required: true
-          hint: Regional account defaults. Requires AWS CLI, jq and an enabled GuardDuty detector (GuardDuty powertool). Insights and Runtime Monitoring incur charges. Trunking requires supported new Linux EC2 hosts, non-shared subnets, resource-based IPv4 DNS disabled and the ECS service-linked role. Fargate monitoring requires Linux 1.4.0+, execution-role agent-pull permissions and ECR connectivity; existing tasks need a planned redeployment. EC2 runtime agents are configured separately.
+          hint: Applies per Region to new clusters and supported new Linux EC2 hosts. Insights and Runtime Monitoring incur charges. Trunking requires non-shared subnets, resource-based IPv4 DNS disabled and the ECS service-linked role.
+        - name: DETECTOR_ID
+          example: 12abc34d567e8fa901bc2d34e56789f01
+          required: true
+          hint: Enabled GuardDuty detector in this Region. Migrate legacy EKS Runtime Monitoring first, if enabled. Fargate agents require Linux 1.4.0+, execution-role permissions and ECR connectivity; redeploy existing tasks. EC2 host agents are configured separately.
       command: |-
-        (
-          set -euo pipefail
-          export AWS_PAGER=""
-          : "${REGION:?Set REGION}"
-          command -v jq >/dev/null
-          # Preflight before writes; organization-managed accounts need their GuardDuty administrator.
-          DETECTOR_ID=$(aws guardduty list-detectors --region "$REGION" --query 'DetectorIds[0]' --output text)
-          test -n "$DETECTOR_ID" && test "$DETECTOR_ID" != None || { echo 'Enable GuardDuty in this Region first.' >&2; exit 1; }
-          DETECTOR=$(aws guardduty get-detector --region "$REGION" --detector-id "$DETECTOR_ID" --output json)
-          echo "$DETECTOR" | jq -e '.Status == "ENABLED"' >/dev/null || { echo 'Enable the GuardDuty detector first.' >&2; exit 1; }
-          echo "$DETECTOR" | jq -e '[.Features[]? | select(.Name == "EKS_RUNTIME_MONITORING" and .Status == "ENABLED")] | length == 0' >/dev/null || { echo 'Migrate legacy EKS Runtime Monitoring to Runtime Monitoring first.' >&2; exit 1; }
-          # Keep existing EC2/EKS agent settings; enable automatic Fargate agents only.
-          FEATURES=$(echo "$DETECTOR" | jq -c '[{
-            Name: "RUNTIME_MONITORING", Status: "ENABLED",
-            AdditionalConfiguration: ([.Features[]? | select(.Name == "RUNTIME_MONITORING") | .AdditionalConfiguration[]? | select(.Name != "ECS_FARGATE_AGENT_MANAGEMENT") | {Name, Status}] + [{Name: "ECS_FARGATE_AGENT_MANAGEMENT", Status: "ENABLED"}])
-          }]')
-          aws guardduty update-detector --region "$REGION" --detector-id "$DETECTOR_ID" --features "$FEATURES"
-          # New clusters / new supported EC2 hosts; existing principal overrides remain in force.
-          aws ecs put-account-setting-default --region "$REGION" --name containerInsights --value enhanced
-          aws ecs put-account-setting-default --region "$REGION" --name awsvpcTrunking --value enabled
-          # Caller-effective settings; explicit cluster/task settings can still override defaults.
-          aws ecs list-account-settings --region "$REGION" --effective-settings --output table
-          aws guardduty get-detector --region "$REGION" --detector-id "$DETECTOR_ID" --query Features --output table
-        )
+        aws ecs put-account-setting-default --region "$REGION" --name containerInsights --value enhanced
+        aws ecs put-account-setting-default --region "$REGION" --name awsvpcTrunking --value enabled
+        aws guardduty update-detector --region "$REGION" --detector-id "$DETECTOR_ID" --features 'Name=RUNTIME_MONITORING,Status=ENABLED,AdditionalConfiguration=[{Name=ECS_FARGATE_AGENT_MANAGEMENT,Status=ENABLED}]'
     - id: parameter-store-intelligent-tiering
-      title: Parameter Store · Intelligent-Tiering
+      title: Parameter Store Intelligent-Tiering
       command: |-
         # Current account and Region; default when no tier is specified.
         aws ssm update-service-setting --setting-id /ssm/parameter-store/default-parameter-tier --setting-value Intelligent-Tiering

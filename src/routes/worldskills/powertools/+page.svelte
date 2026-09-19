@@ -109,7 +109,7 @@
                       class="copy-button"
                       aria-pressed={mode === 'serviceOnly'}
                       onclick={() => (commandModes[snippet.id] = 'serviceOnly')}
-                      >CloudFormation · service only</button
+                      >CloudFormation service only</button
                     >
                   {/if}
                   {#if snippet.cliCommand}<button
@@ -166,7 +166,7 @@
                 <details class="border-t border-white/10">
                   <summary class="cursor-pointer px-4 py-2.5 text-sm text-slate-300"
                     >{snippet.documentTitle}{mode === 'serviceOnly'
-                      ? ' · service only'
+                      ? ' service only'
                       : ''}</summary
                   >
                   <div class="flex justify-end px-4 pb-2">
