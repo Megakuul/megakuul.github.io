@@ -1,0 +1,10 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "rds-db:connect",
+      "Resource": "arn:aws:rds-db:eu-central-1:111122223333:dbuser:db-ABCDEFGHIJKLMNOP/app_user"
+    }
+  ]
+}

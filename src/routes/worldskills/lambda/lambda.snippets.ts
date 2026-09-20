@@ -1,4 +1,5 @@
 import drivers from './database.snippets';
+import rdsIam from './rds-iam.snippets';
 
 /** Raw Lambda snippet catalogue. Highlighted at build time in +page.server.ts.
  *
@@ -66,7 +67,9 @@ import { STSClient, GetCallerIdentityCommand, AssumeRoleCommand } from '@aws-sdk
 import { KMSClient, EncryptCommand, DecryptCommand, GenerateDataKeyCommand } from '@aws-sdk/client-kms';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { CloudWatchClient, PutMetricDataCommand } from '@aws-sdk/client-cloudwatch';
-import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
+import { BedrockRuntimeClient, ConverseCommand, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
+import { BedrockAgentRuntimeClient, RetrieveAndGenerateCommand } from '@aws-sdk/client-bedrock-agent-runtime';
+import { BedrockAgentCoreClient, InvokeAgentRuntimeCommand } from '@aws-sdk/client-bedrock-agentcore';
 import { CognitoIdentityProviderClient, AdminGetUserCommand, AdminCreateUserCommand, AdminSetUserPasswordCommand } from '@aws-sdk/client-cognito-identity-provider';
 import { ApiGatewayManagementApiClient, PostToConnectionCommand } from '@aws-sdk/client-apigatewaymanagementapi';
 import { IoTClient, DescribeEndpointCommand, CreateJobCommand, DescribeJobCommand } from '@aws-sdk/client-iot';
@@ -80,6 +83,7 @@ import { gunzipSync } from 'node:zlib';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, chmodSync, readFileSync } from 'node:fs';
 import { basename } from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 const s3 = new S3Client({});
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
@@ -103,6 +107,8 @@ const kms = new KMSClient({});
 const ses = new SESv2Client({});
 const cw = new CloudWatchClient({});
 const bedrock = new BedrockRuntimeClient({});
+const bedrockAgent = new BedrockAgentRuntimeClient({});
+const agentcore = new BedrockAgentCoreClient({});
 const idp = new CognitoIdentityProviderClient({});
 const iot = new IoTClient({});
 const transfer = new TransferClient({});
@@ -112,6 +118,7 @@ const scheduler = new SchedulerClient({});
 const datasync = new DataSyncClient({});`,
       py: `import boto3, json, base64, gzip, os, shutil, subprocess, time
 from datetime import datetime, timezone
+from uuid import uuid4
 from urllib.parse import unquote_plus
 from boto3.dynamodb.conditions import Key, Attr
 from boto3.dynamodb.types import TypeDeserializer
@@ -139,6 +146,8 @@ kms = boto3.client("kms")
 ses = boto3.client("sesv2")
 cw = boto3.client("cloudwatch")
 bedrock = boto3.client("bedrock-runtime")
+bedrock_agent = boto3.client("bedrock-agent-runtime")
+agentcore = boto3.client("bedrock-agentcore")
 idp = boto3.client("cognito-idp")
 iot = boto3.client("iot")
 transfer = boto3.client("transfer")
@@ -761,14 +770,18 @@ const outgoing: Group = {
     {
       id: 'out-sns',
       title: 'Publish to SNS',
-      js: `await sns.send(new PublishCommand({
-  TopicArn: process.env.TOPIC,
+      js: `const TOPIC = "arn:aws:sns:eu-central-1:111122223333:my-topic";
+
+await sns.send(new PublishCommand({
+  TopicArn: TOPIC,
   Subject: 'order placed',
   Message: JSON.stringify({ orderId: '42' }),
   MessageAttributes: { trace: { DataType: 'String', StringValue: 'abc' } },
 }));`,
-      py: `sns.publish(
-    TopicArn=os.environ["TOPIC"],
+      py: `TOPIC = "arn:aws:sns:eu-central-1:111122223333:my-topic"
+
+sns.publish(
+    TopicArn=TOPIC,
     Subject="order placed",
     Message=json.dumps({"orderId": "42"}),
     MessageAttributes={"trace": {"DataType": "String", "StringValue": "abc"}},
@@ -778,8 +791,10 @@ const outgoing: Group = {
       id: 'out-sqs',
       title: 'Send to SQS',
       note: 'This example targets a FIFO queue. Remove MessageGroupId / MessageDeduplicationId for a standard queue. Batch send takes up to 10 entries per call and reports per-entry failures instead of throwing.',
-      js: `await sqs.send(new SendMessageCommand({
-  QueueUrl: process.env.QUEUE,
+      js: `const QUEUE = "https://sqs.eu-central-1.amazonaws.com/111122223333/my-queue";
+
+await sqs.send(new SendMessageCommand({
+  QueueUrl: QUEUE,
   MessageBody: JSON.stringify({ job: 'resize' }),
   MessageAttributes: { trace: { DataType: 'String', StringValue: 'abc' } },
   MessageGroupId: 'g1',
@@ -787,15 +802,17 @@ const outgoing: Group = {
 }));
 
 const batch = await sqs.send(new SendMessageBatchCommand({
-  QueueUrl: process.env.QUEUE,
+  QueueUrl: QUEUE,
   Entries: [
     { Id: '1', MessageBody: JSON.stringify({ job: 'resize' }), MessageGroupId: 'g1', MessageDeduplicationId: 'd1' },
     { Id: '2', MessageBody: JSON.stringify({ job: 'thumbnail' }), MessageGroupId: 'g1', MessageDeduplicationId: 'd2' },
   ],
 }));
 const failed = batch.Failed;`,
-      py: `sqs.send_message(
-    QueueUrl=os.environ["QUEUE"],
+      py: `QUEUE = "https://sqs.eu-central-1.amazonaws.com/111122223333/my-queue"
+
+sqs.send_message(
+    QueueUrl=QUEUE,
     MessageBody=json.dumps({"job": "resize"}),
     MessageAttributes={"trace": {"DataType": "String", "StringValue": "abc"}},
     MessageGroupId="g1",
@@ -803,7 +820,7 @@ const failed = batch.Failed;`,
 )
 
 batch = sqs.send_message_batch(
-    QueueUrl=os.environ["QUEUE"],
+    QueueUrl=QUEUE,
     Entries=[
         {"Id": "1", "MessageBody": json.dumps({"job": "resize"}), "MessageGroupId": "g1", "MessageDeduplicationId": "d1"},
         {"Id": "2", "MessageBody": json.dumps({"job": "thumbnail"}), "MessageGroupId": "g1", "MessageDeduplicationId": "d2"},
@@ -823,13 +840,17 @@ sfn.send_task_failure(taskToken=event["taskToken"], error="Nope", cause="validat
     {
       id: 'out-kinesis',
       title: 'Put record to Kinesis',
-      js: `await kinesis.send(new PutRecordCommand({
-  StreamName: process.env.STREAM,
+      js: `const STREAM = "my-stream";
+
+await kinesis.send(new PutRecordCommand({
+  StreamName: STREAM,
   PartitionKey: 'p1',
   Data: Buffer.from(JSON.stringify({ x: 1 })),
 }));`,
-      py: `kinesis.put_record(
-    StreamName=os.environ["STREAM"],
+      py: `STREAM = "my-stream"
+
+kinesis.put_record(
+    StreamName=STREAM,
     PartitionKey="p1",
     Data=json.dumps({"x": 1}).encode(),
 )`,
@@ -851,10 +872,13 @@ out = json.loads(res["Payload"].read())`,
       id: 'out-submit-batch',
       title: 'Submit an AWS Batch job',
       note: 'Set BATCH_JOB_QUEUE and BATCH_JOB_DEFINITION (name:revision or ARN) for an existing queue and job definition. The Lambda execution role needs batch:SubmitJob on both the queue ARN and job-definition revision ARN. Returns a job ID once accepted; the job runs asynchronously. Container overrides below target a single-container ECS/EC2 or Fargate job definition using containerProperties. Repeated submissions can create duplicate jobs, even with the same jobName.',
-      js: `const submitted = await batchClient.send(new SubmitJobCommand({
+      js: `const BATCH_JOB_QUEUE = "my-job-queue";
+const BATCH_JOB_DEFINITION = "my-job-definition";
+
+const submitted = await batchClient.send(new SubmitJobCommand({
   jobName: 'process-input-' + Date.now(),
-  jobQueue: process.env.BATCH_JOB_QUEUE,
-  jobDefinition: process.env.BATCH_JOB_DEFINITION,
+  jobQueue: BATCH_JOB_QUEUE,
+  jobDefinition: BATCH_JOB_DEFINITION,
   containerOverrides: {
     command: ['python', 'worker.py', '--input', 's3://my-bucket/input.json'],
     environment: [{ name: 'OUTPUT_BUCKET', value: 'my-output-bucket' }],
@@ -866,10 +890,13 @@ out = json.loads(res["Payload"].read())`,
   // Optional dependency: dependsOn: [{ jobId: 'previous-job-id' }],
 }));
 console.log('Batch job submitted', { jobId: submitted.jobId, jobArn: submitted.jobArn });`,
-      py: `submitted = batch_client.submit_job(
+      py: `BATCH_JOB_QUEUE = "my-job-queue"
+BATCH_JOB_DEFINITION = "my-job-definition"
+
+submitted = batch_client.submit_job(
     jobName="process-input-" + str(time.time_ns()),
-    jobQueue=os.environ["BATCH_JOB_QUEUE"],
-    jobDefinition=os.environ["BATCH_JOB_DEFINITION"],
+    jobQueue=BATCH_JOB_QUEUE,
+    jobDefinition=BATCH_JOB_DEFINITION,
     containerOverrides={
         "command": ["python", "worker.py", "--input", "s3://my-bucket/input.json"],
         "environment": [{"name": "OUTPUT_BUCKET", "value": "my-output-bucket"}],
@@ -1111,7 +1138,10 @@ rds_data.execute_statement(
       id: 'svc-rds-proxy',
       title: 'RDS via RDS Proxy (MySQL / MariaDB IAM auth)',
       note: 'Use RDS Proxy for supported engines: MySQL, MariaDB, PostgreSQL, and SQL Server. It does not support Oracle or Db2, and SQL Server cannot use this password-token pattern. This is the MySQL/MariaDB IAM-auth shape; PostgreSQL is equivalent with pg. The role needs rds-db:connect and the driver must be bundled.',
-      js: `// build + publish the driver as a layer once:
+      js: `const DB_PROXY_HOST = "my-proxy.proxy-abcdefghijkl.eu-central-1.rds.amazonaws.com";
+const DB_USER = "app_user";
+
+// build + publish the driver as a layer once:
 // mkdir -p layer/nodejs && npm install mysql2 --prefix layer/nodejs
 // curl -o layer/global-bundle.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
 // cd layer && zip -r mysql2-layer.zip nodejs global-bundle.pem
@@ -1121,16 +1151,16 @@ rds_data.execute_statement(
 import mysql from 'mysql2/promise'; // not in the runtime: the layer above
 
 const signer = new Signer({
-  hostname: process.env.DB_PROXY_HOST,
+  hostname: DB_PROXY_HOST,
   port: 3306,
-  username: process.env.DB_USER,
+  username: DB_USER,
   region: 'eu-central-1',
 });
 
 const conn = await mysql.createConnection({
-  host: process.env.DB_PROXY_HOST,
+  host: DB_PROXY_HOST,
   port: 3306,
-  user: process.env.DB_USER,
+  user: DB_USER,
   database: 'app',
   password: await signer.getAuthToken(),
   ssl: { ca: readFileSync('/opt/global-bundle.pem') },
@@ -1141,7 +1171,10 @@ const [rows] = await conn.execute('SELECT id, name, email FROM users WHERE id = 
 await conn.execute('UPDATE users SET email = ? WHERE id = ?', ['new@b.ch', 1]);
 await conn.execute('DELETE FROM users WHERE id = ?', [1]);
 await conn.end();`,
-      py: `# build + publish the driver as a layer once:
+      py: `DB_PROXY_HOST = "my-proxy.proxy-abcdefghijkl.eu-central-1.rds.amazonaws.com"
+DB_USER = "app_user"
+
+# build + publish the driver as a layer once:
 # mkdir -p layer/python && pip install pymysql -t layer/python
 # curl -o layer/global-bundle.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
 # cd layer && zip -r pymysql-layer.zip python global-bundle.pem
@@ -1151,13 +1184,13 @@ await conn.end();`,
 import pymysql  # not in the runtime: the layer above
 
 token = rds.generate_db_auth_token(
-    DBHostname=os.environ["DB_PROXY_HOST"], Port=3306, DBUsername=os.environ["DB_USER"], Region="eu-central-1"
+    DBHostname=DB_PROXY_HOST, Port=3306, DBUsername=DB_USER, Region="eu-central-1"
 )
 
 conn = pymysql.connect(
-    host=os.environ["DB_PROXY_HOST"],
+    host=DB_PROXY_HOST,
     port=3306,
-    user=os.environ["DB_USER"],
+    user=DB_USER,
     database="app",
     password=token,
     auth_plugin_map={"mysql_clear_password": None},
@@ -1179,11 +1212,13 @@ conn.close()`,
       id: 'db-dsql',
       title: 'Aurora DSQL (PostgreSQL wire protocol)',
       note: 'Bundle the AWS Aurora DSQL connector and its PostgreSQL peer driver. The connector creates short-lived IAM tokens automatically; the Lambda role needs dsql:DbConnectAdmin for user admin (use dsql:DbConnect for a mapped custom role).',
-      js: `// npm install @aws/aurora-dsql-node-postgres-connector @aws-sdk/credential-providers @aws-sdk/dsql-signer pg
+      js: `const DSQL_HOST = "my-cluster.dsql.eu-central-1.on.aws";
+
+// npm install @aws/aurora-dsql-node-postgres-connector @aws-sdk/credential-providers @aws-sdk/dsql-signer pg
 import { AuroraDSQLClient } from '@aws/aurora-dsql-node-postgres-connector';
 
 const conn = new AuroraDSQLClient({
-  host: process.env.DSQL_HOST,
+  host: DSQL_HOST,
   user: 'admin',
   database: 'postgres',
 });
@@ -1198,10 +1233,13 @@ try {
 } finally {
   await conn.end();
 }`,
-      py: `# pip install aurora-dsql-python-connector "psycopg[binary]" into the function package or a layer
+      py: `DSQL_HOST = "my-cluster.dsql.eu-central-1.on.aws"
+AWS_REGION = "eu-central-1"
+
+# pip install aurora-dsql-python-connector "psycopg[binary]" into the function package or a layer
 import aurora_dsql_psycopg as dsql
 
-conn = dsql.connect(host=os.environ["DSQL_HOST"], region=os.environ["AWS_REGION"], user="admin", dbname="postgres")
+conn = dsql.connect(host=DSQL_HOST, region=AWS_REGION, user="admin", dbname="postgres")
 try:
     with conn.cursor() as cur:
         cur.execute("INSERT INTO users (id, name, email) VALUES (%s, %s, %s)", (1, "Ann", "a@b.ch"))
@@ -1270,12 +1308,14 @@ redshift_run("DELETE FROM users WHERE id = :id", [{"name": "id", "value": "1"}])
     {
       id: 'db-documentdb',
       title: 'Amazon DocumentDB (MongoDB API)',
-      note: 'Put mongodb / pymongo and the AWS global RDS CA bundle in a layer, attach Lambda to the cluster VPC, and store username/password/host in Secrets Manager. retryWrites must stay false because DocumentDB does not support retryable writes.',
+      note: 'Put mongodb / pymongo and the AWS global RDS CA bundle in a layer, attach Lambda to the cluster VPC, and fill in the connection variables (load secret values from your preferred source). retryWrites must stay false because DocumentDB does not support retryable writes.',
       js: `// npm install mongodb; place global-bundle.pem at /opt/global-bundle.pem
 import { MongoClient } from 'mongodb';
 
-const cfg = JSON.parse((await secrets.send(new GetSecretValueCommand({ SecretId: 'prod/documentdb' }))).SecretString);
-const uri = 'mongodb://' + encodeURIComponent(cfg.username) + ':' + encodeURIComponent(cfg.password) + '@' + cfg.host + ':27017/app';
+const DB_HOST = 'my-cluster.cluster-abcdefghijkl.eu-central-1.docdb.amazonaws.com';
+const DB_USER = 'app_user';
+const DB_PASSWORD = 'replace-me';
+const uri = 'mongodb://' + encodeURIComponent(DB_USER) + ':' + encodeURIComponent(DB_PASSWORD) + '@' + DB_HOST + ':27017/app';
 const mongo = new MongoClient(uri, {
   tls: true,
   tlsCAFile: '/opt/global-bundle.pem',
@@ -1299,8 +1339,10 @@ try {
 import pymongo
 from urllib.parse import quote_plus
 
-cfg = json.loads(secrets.get_secret_value(SecretId="prod/documentdb")["SecretString"])
-uri = "mongodb://" + quote_plus(cfg["username"]) + ":" + quote_plus(cfg["password"]) + "@" + cfg["host"] + ":27017/app"
+DB_HOST = "my-cluster.cluster-abcdefghijkl.eu-central-1.docdb.amazonaws.com"
+DB_USER = "app_user"
+DB_PASSWORD = "replace-me"
+uri = "mongodb://" + quote_plus(DB_USER) + ":" + quote_plus(DB_PASSWORD) + "@" + DB_HOST + ":27017/app"
 mongo = pymongo.MongoClient(
     uri, tls=True, tlsCAFile="/opt/global-bundle.pem", replicaSet="rs0",
     readPreference="primaryPreferred", retryWrites=False, authSource="admin",
@@ -1317,16 +1359,19 @@ finally:
     {
       id: 'db-keyspaces',
       title: 'Amazon Keyspaces (Cassandra / CQL)',
-      note: "Bundle the Cassandra driver and CA bundle. This short version uses IAM service-specific credentials from Secrets Manager; for temporary Lambda-role credentials, bundle AWS's SigV4 Cassandra plugin instead. The regional endpoint is public unless you configure an interface VPC endpoint.",
-      js: `// npm install cassandra-driver; place keyspaces-bundle.pem at /opt/keyspaces-bundle.pem
+      note: "Bundle the Cassandra driver and CA bundle. Set the IAM service-specific username and password variables; for temporary Lambda-role credentials, bundle AWS's SigV4 Cassandra plugin instead. The regional endpoint is public unless you configure an interface VPC endpoint.",
+      js: `const AWS_REGION = "eu-central-1";
+
+// npm install cassandra-driver; place keyspaces-bundle.pem at /opt/keyspaces-bundle.pem
 import cassandra from 'cassandra-driver';
 
-const region = process.env.AWS_REGION;
-const cfg = JSON.parse((await secrets.send(new GetSecretValueCommand({ SecretId: 'prod/keyspaces' }))).SecretString);
+const region = AWS_REGION;
+const DB_USER = 'service-specific-username';
+const DB_PASSWORD = 'service-specific-password';
 const keyspaces = new cassandra.Client({
   contactPoints: ['cassandra.' + region + '.amazonaws.com'],
   localDataCenter: region,
-  authProvider: new cassandra.auth.PlainTextAuthProvider(cfg.username, cfg.password),
+  authProvider: new cassandra.auth.PlainTextAuthProvider(DB_USER, DB_PASSWORD),
   sslOptions: { ca: [readFileSync('/opt/keyspaces-bundle.pem')], host: 'cassandra.' + region + '.amazonaws.com', rejectUnauthorized: true },
   protocolOptions: { port: 9142 },
 });
@@ -1341,18 +1386,21 @@ try {
 } finally {
   await keyspaces.shutdown();
 }`,
-      py: `# pip install cassandra-driver into the function package or a layer; place keyspaces-bundle.pem at /opt/keyspaces-bundle.pem
+      py: `AWS_REGION = "eu-central-1"
+
+# pip install cassandra-driver into the function package or a layer; place keyspaces-bundle.pem at /opt/keyspaces-bundle.pem
 from cassandra.auth import PlainTextAuthProvider
 from cassandra.cluster import Cluster
 from ssl import SSLContext, PROTOCOL_TLS_CLIENT
 
-region = os.environ["AWS_REGION"]
-cfg = json.loads(secrets.get_secret_value(SecretId="prod/keyspaces")["SecretString"])
+region = AWS_REGION
+DB_USER = "service-specific-username"
+DB_PASSWORD = "service-specific-password"
 tls = SSLContext(PROTOCOL_TLS_CLIENT)
 tls.load_verify_locations("/opt/keyspaces-bundle.pem")
 cluster = Cluster(
     ["cassandra." + region + ".amazonaws.com"], port=9142, ssl_context=tls,
-    auth_provider=PlainTextAuthProvider(username=cfg["username"], password=cfg["password"]),
+    auth_provider=PlainTextAuthProvider(username=DB_USER, password=DB_PASSWORD),
 )
 session = cluster.connect()
 try:
@@ -1367,8 +1415,10 @@ finally:
       id: 'db-neptune',
       title: 'Amazon Neptune Database (openCypher Data API)',
       note: 'The SDK signs requests, so no graph driver is needed. Lambda still needs network access to the Neptune cluster endpoint and neptune-db read/write/delete query permissions. Retries are disabled because retrying a mutation that is still running can duplicate work.',
-      js: `const neptune = new NeptunedataClient({
-  endpoint: 'https://' + process.env.NEPTUNE_HOST + ':8182',
+      js: `const NEPTUNE_HOST = "my-cluster.cluster-abcdefghijkl.eu-central-1.neptune.amazonaws.com";
+
+const neptune = new NeptunedataClient({
+  endpoint: 'https://' + NEPTUNE_HOST + ':8182',
   maxAttempts: 1,
 });
 const cypher = (openCypherQuery, parameters = {}) => neptune.send(new ExecuteOpenCypherQueryCommand({
@@ -1381,11 +1431,13 @@ const got = await cypher('MATCH (u:User {id: $id}) RETURN u', { id: '42' });
 const rows = got.results;
 await cypher('MATCH (u:User {id: $id}) SET u.email = $email', { id: '42', email: 'new@b.ch' });
 await cypher('MATCH (u:User {id: $id}) DETACH DELETE u', { id: '42' });`,
-      py: `from botocore.config import Config
+      py: `NEPTUNE_HOST = "my-cluster.cluster-abcdefghijkl.eu-central-1.neptune.amazonaws.com"
+
+from botocore.config import Config
 
 neptune = boto3.client(
     "neptunedata",
-    endpoint_url="https://" + os.environ["NEPTUNE_HOST"] + ":8182",
+    endpoint_url="https://" + NEPTUNE_HOST + ":8182",
     config=Config(read_timeout=None, retries={"total_max_attempts": 1}),
 )
 
@@ -1451,11 +1503,15 @@ rows = got["Rows"]`,
       id: 'db-elasticache',
       title: 'Amazon ElastiCache (Valkey / Redis OSS)',
       note: 'Bundle redis / redis-py and run Lambda in the cache VPC. This targets ElastiCache Serverless or a cluster-mode-disabled primary endpoint with TLS and password auth; for cluster mode enabled, use createCluster / RedisCluster with the configuration endpoint.',
-      js: `// npm install redis into the function package or a layer
+      js: `const CACHE_USER = "app_user";
+const CACHE_PASSWORD = "replace-me";
+const CACHE_HOST = "my-cache.example.com";
+
+// npm install redis into the function package or a layer
 import { createClient } from 'redis';
 
 const redis = createClient({
-  url: 'rediss://' + encodeURIComponent(process.env.CACHE_USER) + ':' + encodeURIComponent(process.env.CACHE_PASSWORD) + '@' + process.env.CACHE_HOST + ':6379',
+  url: 'rediss://' + encodeURIComponent(CACHE_USER) + ':' + encodeURIComponent(CACHE_PASSWORD) + '@' + CACHE_HOST + ':6379',
 });
 redis.on('error', (err) => console.error(err));
 await redis.connect();
@@ -1468,12 +1524,16 @@ try {
 } finally {
   await redis.close();
 }`,
-      py: `# pip install redis into the function package or a layer
+      py: `CACHE_HOST = "my-cache.example.com"
+CACHE_USER = "app_user"
+CACHE_PASSWORD = "replace-me"
+
+# pip install redis into the function package or a layer
 import redis
 
 cache = redis.Redis(
-    host=os.environ["CACHE_HOST"], port=6379, ssl=True,
-    username=os.environ["CACHE_USER"], password=os.environ["CACHE_PASSWORD"],
+    host=CACHE_HOST, port=6379, ssl=True,
+    username=CACHE_USER, password=CACHE_PASSWORD,
     decode_responses=True,
 )
 cache.set("user:42", json.dumps({"name": "Ann", "email": "a@b.ch"}), ex=3600)
@@ -1487,11 +1547,13 @@ cache.close()`,
       id: 'db-elasticache-memcached',
       title: 'Amazon ElastiCache (Memcached)',
       note: 'Bundle memcache-client / pymemcache and run Lambda in the cache VPC. The serverless cache endpoint requires TLS; set overwrites an existing key, so it doubles as the update operation.',
-      js: `// npm install memcache-client into the function package or a layer
+      js: `const MEMCACHED_HOST = "my-cache.example.com";
+
+// npm install memcache-client into the function package or a layer
 import { MemcacheClient } from 'memcache-client';
 
 const cache = new MemcacheClient({
-  server: process.env.MEMCACHED_HOST + ':11211',
+  server: MEMCACHED_HOST + ':11211',
   tls: {},
 });
 await cache.set('user:42', JSON.stringify({ name: 'Ann', email: 'a@b.ch' }), { lifetime: 3600 });
@@ -1499,11 +1561,13 @@ const item = JSON.parse((await cache.get('user:42')).value);
 await cache.set('user:42', JSON.stringify({ name: 'Ann', email: 'new@b.ch' }), { lifetime: 3600 });
 await cache.delete('user:42');
 cache.shutdown();`,
-      py: `# pip install pymemcache into the function package or a layer
+      py: `MEMCACHED_HOST = "my-cache.example.com"
+
+# pip install pymemcache into the function package or a layer
 import ssl
 from pymemcache.client.base import Client
 
-cache = Client((os.environ["MEMCACHED_HOST"], 11211), tls_context=ssl.create_default_context())
+cache = Client((MEMCACHED_HOST, 11211), tls_context=ssl.create_default_context())
 cache.set("user:42", json.dumps({"name": "Ann", "email": "a@b.ch"}), expire=3600, noreply=False)
 item = json.loads(cache.get("user:42"))
 cache.set("user:42", json.dumps({"name": "Ann", "email": "new@b.ch"}), expire=3600, noreply=False)
@@ -1514,11 +1578,15 @@ cache.close()`,
       id: 'db-memorydb',
       title: 'Amazon MemoryDB (Valkey / Redis OSS)',
       note: 'Bundle redis / redis-py and run Lambda in the MemoryDB VPC. MemoryDB is cluster-mode enabled, so use a cluster-aware client against the cluster endpoint. This concise version uses an ACL username/password; IAM auth can replace the password with a 15-minute signed token.',
-      js: `// npm install redis into the function package or a layer
+      js: `const MEMORYDB_USER = "app_user";
+const MEMORYDB_PASSWORD = "replace-me";
+const MEMORYDB_HOST = "my-cluster.example.com";
+
+// npm install redis into the function package or a layer
 import { createCluster } from 'redis';
 
 const memorydb = createCluster({
-  rootNodes: [{ url: 'rediss://' + encodeURIComponent(process.env.MEMORYDB_USER) + ':' + encodeURIComponent(process.env.MEMORYDB_PASSWORD) + '@' + process.env.MEMORYDB_HOST + ':6379' }],
+  rootNodes: [{ url: 'rediss://' + encodeURIComponent(MEMORYDB_USER) + ':' + encodeURIComponent(MEMORYDB_PASSWORD) + '@' + MEMORYDB_HOST + ':6379' }],
   defaults: { socket: { tls: true } },
 });
 memorydb.on('error', (err) => console.error(err));
@@ -1532,12 +1600,16 @@ try {
 } finally {
   await memorydb.close();
 }`,
-      py: `# pip install redis into the function package or a layer
+      py: `MEMORYDB_HOST = "my-cluster.example.com"
+MEMORYDB_USER = "app_user"
+MEMORYDB_PASSWORD = "replace-me"
+
+# pip install redis into the function package or a layer
 from redis.cluster import RedisCluster
 
 memorydb = RedisCluster(
-    host=os.environ["MEMORYDB_HOST"], port=6379, ssl=True,
-    username=os.environ["MEMORYDB_USER"], password=os.environ["MEMORYDB_PASSWORD"],
+    host=MEMORYDB_HOST, port=6379, ssl=True,
+    username=MEMORYDB_USER, password=MEMORYDB_PASSWORD,
     decode_responses=True,
 )
 memorydb.set("user:42", json.dumps({"name": "Ann", "email": "a@b.ch"}))
@@ -1615,8 +1687,10 @@ url = s3.generate_presigned_url("get_object", Params={"Bucket": "my-bucket", "Ke
       id: 'svc-sqs-receive',
       title: 'SQS manual receive + delete',
       note: 'For when you poll a queue yourself instead of using an event source mapping. WaitTimeSeconds turns on long polling; delete each message once handled or it comes back.',
-      js: `const recv = await sqs.send(new ReceiveMessageCommand({
-  QueueUrl: process.env.QUEUE,
+      js: `const QUEUE = "https://sqs.eu-central-1.amazonaws.com/111122223333/my-queue";
+
+const recv = await sqs.send(new ReceiveMessageCommand({
+  QueueUrl: QUEUE,
   MaxNumberOfMessages: 10,
   WaitTimeSeconds: 20,
   VisibilityTimeout: 30,
@@ -1625,10 +1699,12 @@ url = s3.generate_presigned_url("get_object", Params={"Bucket": "my-bucket", "Ke
 }));
 for (const m of recv.Messages ?? []) {
   console.log(m.MessageId, m.Body, m.Attributes, m.MessageAttributes);
-  await sqs.send(new DeleteMessageCommand({ QueueUrl: process.env.QUEUE, ReceiptHandle: m.ReceiptHandle }));
+  await sqs.send(new DeleteMessageCommand({ QueueUrl: QUEUE, ReceiptHandle: m.ReceiptHandle }));
 }`,
-      py: `recv = sqs.receive_message(
-    QueueUrl=os.environ["QUEUE"],
+      py: `QUEUE = "https://sqs.eu-central-1.amazonaws.com/111122223333/my-queue"
+
+recv = sqs.receive_message(
+    QueueUrl=QUEUE,
     MaxNumberOfMessages=10,
     WaitTimeSeconds=20,
     VisibilityTimeout=30,
@@ -1637,7 +1713,7 @@ for (const m of recv.Messages ?? []) {
 )
 for m in recv.get("Messages", []):
     print(m["MessageId"], m["Body"], m.get("Attributes"), m.get("MessageAttributes"))
-    sqs.delete_message(QueueUrl=os.environ["QUEUE"], ReceiptHandle=m["ReceiptHandle"])`,
+    sqs.delete_message(QueueUrl=QUEUE, ReceiptHandle=m["ReceiptHandle"])`,
     },
     {
       id: 'svc-secrets',
@@ -1941,8 +2017,305 @@ out = json.loads(sync["output"])`,
     },
     {
       id: 'svc-bedrock',
-      title: 'Bedrock invoke model',
-      note: 'The body is the provider schema, this is the Amazon Nova format (schemaVersion messages-v1). Swap modelId for amazon.nova-micro-v1:0 / amazon.nova-pro-v1:0; other providers use their own body shape. InvokeModelWithResponseStream streams tokens.',
+      title: 'Bedrock Converse (recommended)',
+      note: 'Prefer Converse for supported chat/text models. Replace the model and existing guardrail ID/version for your Region; remove optional settings you do not need. Requires bedrock:InvokeModel on the selected model/profile resources and bedrock:ApplyGuardrail on the guardrail. Inference parameter support varies by model; some accept temperature OR topP, not both. For multi-turn chat, resend the history including assistant replies. ConverseStream is the streaming alternative.',
+      js: `const res = await bedrock.send(new ConverseCommand({
+  modelId: 'amazon.nova-lite-v1:0',
+  // modelId: 'arn:aws:bedrock:eu-central-1:111122223333:prompt/ABCDEFGHIJ:1',
+  // promptVariables: { topic: { text: 'AWS backups' } },
+  system: [{ text: 'You are a helpful assistant. Answer concisely and say when you do not know.' }],
+  messages: [{ role: 'user', content: [{ text: 'Say hi' }] }],
+  inferenceConfig: {
+    maxTokens: 512,
+    temperature: 0.7,
+    topP: 0.9,
+    stopSequences: ['<END>'],
+  },
+  // Optional: attach an existing published guardrail; DRAFT is for testing.
+  guardrailConfig: {
+    guardrailIdentifier: 'abc123guardrail',
+    guardrailVersion: '1',
+    trace: 'enabled',
+  },
+  performanceConfig: { latency: 'standard' },
+  requestMetadata: { project: 'worldskills', operation: 'chat' },
+}));
+const text = res.output.message.content
+  .filter(block => typeof block.text === 'string')
+  .map(block => block.text)
+  .join('');
+const stopReason = res.stopReason;
+const usage = res.usage;
+const guardrailIntervened = stopReason === 'guardrail_intervened';
+const guardrailTrace = res.trace?.guardrail; // May contain sensitive content; do not log blindly.`,
+      py: `res = bedrock.converse(
+    modelId="amazon.nova-lite-v1:0",
+    # modelId="arn:aws:bedrock:eu-central-1:111122223333:prompt/ABCDEFGHIJ:1",
+    # promptVariables={"topic": {"text": "AWS backups"}},
+    system=[{"text": "You are a helpful assistant. Answer concisely and say when you do not know."}],
+    messages=[{"role": "user", "content": [{"text": "Say hi"}]}],
+    inferenceConfig={
+        "maxTokens": 512,
+        "temperature": 0.7,
+        "topP": 0.9,
+        "stopSequences": ["<END>"],
+    },
+    # Optional: attach an existing published guardrail; DRAFT is for testing.
+    guardrailConfig={
+        "guardrailIdentifier": "abc123guardrail",
+        "guardrailVersion": "1",
+        "trace": "enabled",
+    },
+    performanceConfig={"latency": "standard"},
+    requestMetadata={"project": "worldskills", "operation": "chat"},
+)
+text = "".join(block["text"] for block in res["output"]["message"]["content"] if "text" in block)
+stop_reason = res["stopReason"]
+usage = res["usage"]
+guardrail_intervened = stop_reason == "guardrail_intervened"
+guardrail_trace = res.get("trace", {}).get("guardrail")  # May contain sensitive content; do not log blindly.`,
+    },
+    {
+      id: 'svc-bedrock-tools',
+      title: 'Bedrock Converse tools (call, return result, continue)',
+      note: 'Converse requests tool calls; your Lambda executes them and returns toolResult blocks with matching toolUseId values. This complete loop uses a demo order lookup: replace it with your database/API call and authorize access for the current user. Requires a model supporting tool use and bedrock:InvokeModel; backend access needs its own IAM permissions. Keep messages inside the handler. Copy guardrailConfig from the Converse example into request to apply it on every round. The tool schema describes inputs; toolResult carries your structured JSON return value.',
+      js: `const request = {
+  modelId: 'amazon.nova-lite-v1:0',
+  system: [{ text: 'Use get_order_status for order questions. Never invent an order status.' }],
+  inferenceConfig: { maxTokens: 1024, temperature: 0.2 },
+  toolConfig: {
+    tools: [{ toolSpec: {
+      name: 'get_order_status',
+      description: 'Look up the current status of an order by its ID.',
+      inputSchema: { json: {
+        type: 'object',
+        properties: { orderId: { type: 'string', description: 'Order ID, e.g. 42' } },
+        required: ['orderId'],
+        additionalProperties: false,
+      } },
+    } }],
+    toolChoice: { auto: {} },
+  },
+};
+
+async function runTool(tool) {
+  // Explicit dispatch and validation: never execute arbitrary model-provided code.
+  if (tool.name !== 'get_order_status') throw new Error('Unknown tool');
+  const input = tool.input;
+  if (!input || typeof input.orderId !== 'string' || !input.orderId.trim()
+      || Object.keys(input).some(key => key !== 'orderId')) {
+    throw new Error('Expected a nonempty orderId string');
+  }
+  // Demo data. Replace with an authorized database/API lookup.
+  if (input.orderId !== '42') throw new Error('Order not found');
+  return { orderId: '42', status: 'shipped', trackingNumber: 'DEMO123' };
+}
+
+const messages = [{ role: 'user', content: [{ text: 'What is the status of order 42?' }] }];
+const toolReturns = []; // Structured return values, available without parsing model text.
+let text;
+for (let round = 0; round < 5; round++) {
+  const res = await bedrock.send(new ConverseCommand({ ...request, messages }));
+  const message = res.output.message;
+  messages.push(message); // Preserve the entire assistant message, including toolUse blocks.
+  if (res.stopReason === 'end_turn') {
+    text = message.content.filter(block => typeof block.text === 'string')
+      .map(block => block.text).join('');
+    break;
+  }
+  if (res.stopReason !== 'tool_use') throw new Error('Inference stopped: ' + res.stopReason);
+  if (round === 4) throw new Error('Tool round limit reached');
+  const calls = message.content.filter(block => block.toolUse).map(block => block.toolUse);
+  if (!calls.length) throw new Error('Model requested tools without toolUse blocks');
+  const results = [];
+  for (const tool of calls) {
+    let result;
+    try {
+      result = { toolUseId: tool.toolUseId, status: 'success', content: [{ json: await runTool(tool) }] };
+    } catch {
+      // Return a safe error; do not expose backend exception details to the model.
+      result = { toolUseId: tool.toolUseId, status: 'error', content: [{ text: 'Tool failed: unknown tool, invalid input, or unavailable order.' }] };
+    }
+    toolReturns.push(result);
+    results.push({ toolResult: result });
+  }
+  messages.push({ role: 'user', content: results }); // Return every requested result together.
+}
+// text is the final answer; toolReturns contains the tool outputs and statuses.`,
+      py: `request = {
+    "modelId": "amazon.nova-lite-v1:0",
+    "system": [{"text": "Use get_order_status for order questions. Never invent an order status."}],
+    "inferenceConfig": {"maxTokens": 1024, "temperature": 0.2},
+    "toolConfig": {
+        "tools": [{"toolSpec": {
+            "name": "get_order_status",
+            "description": "Look up the current status of an order by its ID.",
+            "inputSchema": {"json": {
+                "type": "object",
+                "properties": {"orderId": {"type": "string", "description": "Order ID, e.g. 42"}},
+                "required": ["orderId"],
+                "additionalProperties": False,
+            }},
+        }}],
+        "toolChoice": {"auto": {}},
+    },
+}
+
+def run_tool(tool):
+    # Explicit dispatch and validation: never execute arbitrary model-provided code.
+    if tool["name"] != "get_order_status":
+        raise ValueError("Unknown tool")
+    args = tool.get("input")
+    if (not isinstance(args, dict) or set(args) != {"orderId"}
+            or not isinstance(args["orderId"], str) or not args["orderId"].strip()):
+        raise ValueError("Expected a nonempty orderId string")
+    # Demo data. Replace with an authorized database/API lookup.
+    if args["orderId"] != "42":
+        raise ValueError("Order not found")
+    return {"orderId": "42", "status": "shipped", "trackingNumber": "DEMO123"}
+
+messages = [{"role": "user", "content": [{"text": "What is the status of order 42?"}]}]
+tool_returns = []  # Structured return values, available without parsing model text.
+text = None
+for round_index in range(5):
+    res = bedrock.converse(**request, messages=messages)
+    message = res["output"]["message"]
+    messages.append(message)  # Preserve the whole assistant message, including toolUse blocks.
+    if res["stopReason"] == "end_turn":
+        text = "".join(block["text"] for block in message["content"] if "text" in block)
+        break
+    if res["stopReason"] != "tool_use":
+        raise RuntimeError("Inference stopped: " + res["stopReason"])
+    if round_index == 4:
+        raise RuntimeError("Tool round limit reached")
+    calls = [block["toolUse"] for block in message["content"] if "toolUse" in block]
+    if not calls:
+        raise RuntimeError("Model requested tools without toolUse blocks")
+    results = []
+    for tool in calls:
+        try:
+            result = {"toolUseId": tool["toolUseId"], "status": "success", "content": [{"json": run_tool(tool)}]}
+        except Exception:
+            # Return a safe error; do not expose backend exception details to the model.
+            result = {"toolUseId": tool["toolUseId"], "status": "error", "content": [{"text": "Tool failed: unknown tool, invalid input, or unavailable order."}]}
+        tool_returns.append(result)
+        results.append({"toolResult": result})
+    messages.append({"role": "user", "content": results})  # Return every requested result together.
+# text is the final answer; tool_returns contains the tool outputs and statuses.`,
+    },
+    {
+      id: 'svc-bedrock-kb-rag',
+      title: 'Bedrock Knowledge Bases RAG (retrieve and generate)',
+      note: 'Queries an existing, synced vector knowledge base and generates an answer with source citations through bedrock-agent-runtime. Replace the KB ID, supported model/profile ARN and existing guardrail ID/version. The Lambda role needs bedrock:RetrieveAndGenerate and permissions for the selected model and guardrail; the KB service role separately needs access to its data, embeddings and vector store. Omit sessionId on the first call, then reuse the returned ID only for that user/conversation. The guardrail applies to input/generated output, not the retrieved source documents. Optional metadata filters require ingested metadata.',
+      js: `const res = await bedrockAgent.send(new RetrieveAndGenerateCommand({
+  input: { text: 'What is our backup retention policy?' },
+  // sessionId: previousSessionId, // Only reuse an ID returned by a previous call.
+  retrieveAndGenerateConfiguration: {
+    type: 'KNOWLEDGE_BASE',
+    knowledgeBaseConfiguration: {
+      knowledgeBaseId: 'KB12345678',
+      modelArn: 'arn:aws:bedrock:eu-central-1::foundation-model/amazon.nova-lite-v1:0',
+      retrievalConfiguration: {
+        vectorSearchConfiguration: {
+          numberOfResults: 5,
+          overrideSearchType: 'SEMANTIC', // HYBRID requires a compatible vector store/index.
+          // filter: { equals: { key: 'department', value: 'engineering' } },
+        },
+      },
+      generationConfiguration: {
+        inferenceConfig: {
+          textInferenceConfig: { maxTokens: 1024, temperature: 0.2, topP: 0.9 },
+        },
+        // Optional: remove this block if no guardrail is required.
+        guardrailConfiguration: { guardrailId: 'abc123guardrail', guardrailVersion: '1' },
+      },
+    },
+  },
+}));
+const text = res.output.text;
+const sessionId = res.sessionId; // Persist per user/conversation, not in a shared Lambda global.
+const guardrailIntervened = res.guardrailAction === 'INTERVENED';
+const citations = (res.citations ?? []).map(citation => ({
+  text: citation.generatedResponsePart?.textResponsePart?.text,
+  span: citation.generatedResponsePart?.textResponsePart?.span,
+  sources: (citation.retrievedReferences ?? []).map(source => ({
+    location: source.location, // S3 URI, web URL, etc.; preserve the source type.
+    content: source.content,
+    metadata: source.metadata,
+  })),
+}));`,
+      py: `res = bedrock_agent.retrieve_and_generate(
+    input={"text": "What is our backup retention policy?"},
+    # sessionId=previous_session_id,  # Only reuse an ID returned by a previous call.
+    retrieveAndGenerateConfiguration={
+        "type": "KNOWLEDGE_BASE",
+        "knowledgeBaseConfiguration": {
+            "knowledgeBaseId": "KB12345678",
+            "modelArn": "arn:aws:bedrock:eu-central-1::foundation-model/amazon.nova-lite-v1:0",
+            "retrievalConfiguration": {
+                "vectorSearchConfiguration": {
+                    "numberOfResults": 5,
+                    "overrideSearchType": "SEMANTIC",  # HYBRID requires a compatible vector store/index.
+                    # "filter": {"equals": {"key": "department", "value": "engineering"}},
+                },
+            },
+            "generationConfiguration": {
+                "inferenceConfig": {
+                    "textInferenceConfig": {"maxTokens": 1024, "temperature": 0.2, "topP": 0.9},
+                },
+                # Optional: remove this block if no guardrail is required.
+                "guardrailConfiguration": {"guardrailId": "abc123guardrail", "guardrailVersion": "1"},
+            },
+        },
+    },
+)
+text = res["output"]["text"]
+session_id = res["sessionId"]  # Persist per user/conversation, not in a shared Lambda global.
+guardrail_intervened = res.get("guardrailAction") == "INTERVENED"
+citations = [{
+    "text": citation.get("generatedResponsePart", {}).get("textResponsePart", {}).get("text"),
+    "span": citation.get("generatedResponsePart", {}).get("textResponsePart", {}).get("span"),
+    "sources": [{
+        "location": source.get("location"),  # S3 URI, web URL, etc.; preserve the source type.
+        "content": source.get("content"),
+        "metadata": source.get("metadata"),
+    } for source in citation.get("retrievedReferences", [])],
+} for citation in res.get("citations", [])]`,
+    },
+    {
+      id: 'svc-agentcore-runtime',
+      title: 'Bedrock AgentCore Runtime invoke',
+      note: 'For an existing IAM-authenticated runtime in the client Region. Requires bedrock-agentcore:InvokeAgentRuntime. Match the payload to your agent; reuse the session ID for the same user/conversation. This example buffers the response; SSE responses remain raw text.',
+      js: `const sessionId = randomUUID(); // Create inside the handler; reuse for follow-up calls.
+const res = await agentcore.send(new InvokeAgentRuntimeCommand({
+  agentRuntimeArn: 'arn:aws:bedrock-agentcore:eu-central-1:111122223333:runtime/my_agent-ABCDEFGHIJ',
+  qualifier: 'DEFAULT',
+  runtimeSessionId: sessionId,
+  contentType: 'application/json',
+  accept: 'application/json',
+  payload: Buffer.from(JSON.stringify({ prompt: 'What is our backup retention policy?' })),
+}));
+const body = await res.response.transformToString();
+const out = res.contentType?.includes('application/json') ? JSON.parse(body) : body;`,
+      py: `session_id = str(uuid4())  # Create inside the handler; reuse for follow-up calls.
+res = agentcore.invoke_agent_runtime(
+    agentRuntimeArn="arn:aws:bedrock-agentcore:eu-central-1:111122223333:runtime/my_agent-ABCDEFGHIJ",
+    qualifier="DEFAULT",
+    runtimeSessionId=session_id,
+    contentType="application/json",
+    accept="application/json",
+    payload=json.dumps({"prompt": "What is our backup retention policy?"}).encode("utf-8"),
+)
+try:
+    body = res["response"].read().decode("utf-8")
+finally:
+    res["response"].close()
+out = json.loads(body) if "application/json" in res.get("contentType", "") else body`,
+    },
+    {
+      id: 'svc-bedrock-invoke-model',
+      title: 'Bedrock InvokeModel (native format alternative)',
+      note: 'Use for native provider payloads or models/tasks outside Converse, such as embeddings and image generation. This example uses the Amazon Nova text format (schemaVersion messages-v1); other models need their own request and response schemas. Requires bedrock:InvokeModel. InvokeModelWithResponseStream is the streaming alternative for supported models.',
       js: `const res = await bedrock.send(new InvokeModelCommand({
   modelId: 'amazon.nova-lite-v1:0',
   contentType: 'application/json',
@@ -1972,8 +2345,10 @@ text = out["output"]["message"]["content"][0]["text"]`,
       id: 'svc-kafka',
       title: 'Kafka produce (MSK / self-managed)',
       note: 'kafkajs / kafka-python are not in the Lambda runtime, so this snippet keeps its own import and producer. Ship the dep as a layer or bundle it. Connect once then reuse the producer across invokes.',
-      js: `import { Kafka } from 'kafkajs'; // not in the runtime: add a kafkajs layer (nodejs/node_modules/kafkajs) or bundle it
-const kafka = new Kafka({ clientId: 'lambda', brokers: (process.env.BROKERS ?? '').split(',') });
+      js: `const BROKERS = "broker-1.example.com:9092,broker-2.example.com:9092";
+
+import { Kafka } from 'kafkajs'; // not in the runtime: add a kafkajs layer (nodejs/node_modules/kafkajs) or bundle it
+const kafka = new Kafka({ clientId: 'lambda', brokers: BROKERS.split(',') });
 const producer = kafka.producer();
 
 await producer.connect();
@@ -1984,8 +2359,10 @@ await producer.send({
     { key: 'order-42', value: JSON.stringify({ orderId: '42' }), partition: 0, headers: { trace: 'abc' } },
   ],
 });`,
-      py: `from kafka import KafkaProducer  # not in the runtime: add a kafka-python layer (python/kafka) or bundle it
-producer = KafkaProducer(bootstrap_servers=os.environ.get("BROKERS", "").split(","))
+      py: `BROKERS = "broker-1.example.com:9092,broker-2.example.com:9092"
+
+from kafka import KafkaProducer  # not in the runtime: add a kafka-python layer (python/kafka) or bundle it
+producer = KafkaProducer(bootstrap_servers=BROKERS.split(","))
 
 producer.send(
     "orders",
@@ -2131,22 +2508,32 @@ state = status["JobRun"]["JobRunState"]`,
       id: 'svc-scheduler',
       title: 'Scheduler one-time Lambda invocation',
       note: 'Use an existing schedule group, execution role and DLQ from Powertools. Caller needs scheduler:CreateSchedule and iam:PassRole. Set RUN_AT to a future UTC timestamp (YYYY-MM-DDTHH:MM:SS).',
-      js: `await scheduler.send(new CreateScheduleCommand({
+      js: `const RUN_AT = "2026-12-01T12:00:00";
+const TARGET_ARN = "arn:aws:lambda:eu-central-1:111122223333:function:my-worker";
+const SCHEDULER_ROLE_ARN = "arn:aws:iam::111122223333:role/my-scheduler";
+const DLQ_ARN = "arn:aws:sqs:eu-central-1:111122223333:my-scheduler-dlq";
+
+await scheduler.send(new CreateScheduleCommand({
   Name: 'report-42', GroupName: 'my-scheduler',
-  ScheduleExpression: 'at(' + process.env.RUN_AT + ')', ScheduleExpressionTimezone: 'UTC',
+  ScheduleExpression: 'at(' + RUN_AT + ')', ScheduleExpressionTimezone: 'UTC',
   FlexibleTimeWindow: { Mode: 'OFF' }, ActionAfterCompletion: 'DELETE',
   Target: {
-    Arn: process.env.TARGET_ARN, RoleArn: process.env.SCHEDULER_ROLE_ARN,
+    Arn: TARGET_ARN, RoleArn: SCHEDULER_ROLE_ARN,
     Input: JSON.stringify({ reportId: '42' }),
-    DeadLetterConfig: { Arn: process.env.DLQ_ARN },
+    DeadLetterConfig: { Arn: DLQ_ARN },
     RetryPolicy: { MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 3 },
   },
 }));`,
-      py: `scheduler.create_schedule(Name="report-42", GroupName="my-scheduler",
-    ScheduleExpression="at(" + os.environ["RUN_AT"] + ")", ScheduleExpressionTimezone="UTC",
+      py: `RUN_AT = "2026-12-01T12:00:00"
+TARGET_ARN = "arn:aws:lambda:eu-central-1:111122223333:function:my-worker"
+SCHEDULER_ROLE_ARN = "arn:aws:iam::111122223333:role/my-scheduler"
+DLQ_ARN = "arn:aws:sqs:eu-central-1:111122223333:my-scheduler-dlq"
+
+scheduler.create_schedule(Name="report-42", GroupName="my-scheduler",
+    ScheduleExpression="at(" + RUN_AT + ")", ScheduleExpressionTimezone="UTC",
     FlexibleTimeWindow={"Mode": "OFF"}, ActionAfterCompletion="DELETE",
-    Target={"Arn": os.environ["TARGET_ARN"], "RoleArn": os.environ["SCHEDULER_ROLE_ARN"],
-        "Input": json.dumps({"reportId": "42"}), "DeadLetterConfig": {"Arn": os.environ["DLQ_ARN"]},
+    Target={"Arn": TARGET_ARN, "RoleArn": SCHEDULER_ROLE_ARN,
+        "Input": json.dumps({"reportId": "42"}), "DeadLetterConfig": {"Arn": DLQ_ARN},
         "RetryPolicy": {"MaximumEventAgeInSeconds": 3600, "MaximumRetryAttempts": 3}})`,
     },
     {
@@ -2166,6 +2553,6 @@ state = status["Status"]`,
   ],
 };
 
-export const groups: Group[] = [common, incoming, outgoing, databases, services, drivers];
+export const groups: Group[] = [common, incoming, outgoing, databases, rdsIam, services, drivers];
 
 export default groups;

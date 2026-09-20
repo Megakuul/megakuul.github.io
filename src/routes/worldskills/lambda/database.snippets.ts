@@ -4,11 +4,9 @@ import redshift from './database-examples/redshift.mjs?raw';
 import athena from './database-examples/athena.mjs?raw';
 import redshiftCopy from './database-examples/redshift-copy.sql?raw';
 import athenaIceberg from './database-examples/athena-iceberg.sql?raw';
-import analyticsEnvironment from './database-examples/analytics-environment.json?raw';
 import analyticsInvoke from './database-examples/analytics-invoke.sh?raw';
 import type { Group } from './lambda.snippets';
 import deploy from './database-examples/deploy.sh?raw';
-import environment from './database-examples/environment.json?raw';
 import postgres from './database-examples/postgres.mjs?raw';
 import mysql from './database-examples/mysql.mjs?raw';
 import sqlserver from './database-examples/sqlserver.mjs?raw';
@@ -24,7 +22,8 @@ import cassandraSchema from './database-examples/schema.cql?raw';
 const drivers: Group = {
   id: 'database-drivers',
   title: 'Database drivers',
-  blurb: '',
+  blurb:
+    'Edit the variables at the top of the example you need. Use the function ZIP to try it, or attach the driver layer and copy the handler into your own Lambda. Password values are placeholders; supply secrets from your preferred source.',
   nodeOnly: true,
   downloads: [
     {
@@ -35,13 +34,16 @@ const drivers: Group = {
   ],
   snippets: [
     { id: 'drivers-deploy', title: 'Deploy', js: deploy, py: '', lang: 'bash' },
-    { id: 'drivers-env', title: 'environment.json', js: environment, py: '', lang: 'json' },
     {
       id: 'drivers-config',
-      title: 'Configure / invoke',
+      title: 'Edit / deploy / invoke',
       lang: 'bash',
       py: '',
-      js: `aws lambda update-function-configuration --function-name db-demo --environment file://environment.json
+      js: `unzip -q nodejs-databases-function.zip -d db-demo
+# Edit the variables in db-demo/examples/postgres.mjs (or your chosen example).
+# IAM alternatives: postgres-iam.mjs and mysql-iam.mjs. Complete the RDS IAM setup above.
+(cd db-demo && zip -qr ../db-demo.zip .)
+aws lambda update-function-code --function-name db-demo --zip-file fileb://db-demo.zip
 aws lambda wait function-updated-v2 --function-name db-demo
 aws lambda invoke --function-name db-demo --cli-binary-format raw-in-base64-out --payload '{"database":"postgres"}' result.json`,
     },
@@ -79,15 +81,8 @@ aws lambda invoke --function-name db-demo --cli-binary-format raw-in-base64-out 
     },
     { id: 'drivers-dsql', title: 'Aurora DSQL · pg + IAM connector', js: dsql, py: '' },
     {
-      id: 'drivers-analytics-env',
-      title: 'analytics-environment.json',
-      js: analyticsEnvironment,
-      py: '',
-      lang: 'json',
-    },
-    {
       id: 'drivers-analytics-invoke',
-      title: 'Analytics · configure / invoke',
+      title: 'Analytics · deploy / invoke',
       js: analyticsInvoke,
       py: '',
       lang: 'bash',

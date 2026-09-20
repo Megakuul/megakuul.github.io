@@ -1,11 +1,13 @@
 import { MemcacheClient } from 'memcache-client';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+
+const DB_HOST = 'my-cache.example.com';
+const DB_PORT = 11211;
 
 export const handler = async () => {
   const db = new MemcacheClient({
-    server: process.env.DB_HOST + ':' + (process.env.DB_PORT || '11211'),
-    tls: process.env.DB_CA_FILE ? { ca: readFileSync(process.env.DB_CA_FILE, 'utf8') } : {},
+    server: DB_HOST + ':' + DB_PORT,
+    tls: {},
   });
   const key = 'demo:' + randomUUID();
   try {

@@ -33,12 +33,12 @@
   <title>Lambda Cheatsheet | Megakuul</title>
   <meta
     name="description"
-    content="Every AWS Lambda incoming trigger and outgoing event as a short, comment-free example in JavaScript and Python."
+    content="Copy-ready AWS Lambda examples in JavaScript and Python with explicit configuration variables."
   />
   <meta property="og:title" content="Lambda Cheatsheet - Megakuul" />
   <meta
     property="og:description"
-    content="Every AWS Lambda incoming trigger and outgoing event as a short, comment-free example in JavaScript and Python."
+    content="Copy-ready AWS Lambda examples in JavaScript and Python with explicit configuration variables."
   />
   <meta property="og:type" content="website" />
   <meta property="og:image" content="https://megakuul.ch/favicon.png" />
@@ -90,8 +90,9 @@
     <header class="mb-10">
       <h1 class="mb-3 text-3xl font-bold sm:text-5xl">Lambda Cheatsheet</h1>
       <p class="max-w-2xl text-slate-200/50 sm:text-lg">
-        Every incoming trigger and outgoing event as a short, comment-free handler. Flip the whole
-        page between JavaScript and Python with the switch up top. Jump anywhere with the menu.
+        Copy-ready handlers and service examples with configuration variables you can edit directly.
+        Flip the whole page between JavaScript and Python with the switch up top. Jump anywhere with
+        the menu.
       </p>
     </header>
 
