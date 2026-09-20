@@ -203,12 +203,12 @@ function network(t: CloudFormationTemplate) {
   });
   t.Outputs!.VpcId = { Value: ref('Vpc') };
 }
-function compute(asg: boolean) {
+function compute(templateOnly: boolean) {
   const p = base(
-    asg ? 'asg' : 'ec2',
-    asg ? 'Launch Template + ASG' : 'EC2',
-    asg
-      ? 'Private AL2023 instances across two AZs; internal ALB, CPU autoscaling (2–4), SSM and logs. One NAT gateway. Attach the output client security group to authorized VPC clients.'
+    templateOnly ? 'asg' : 'ec2',
+    templateOnly ? 'Launch Template' : 'EC2',
+    templateOnly
+      ? 'Reusable AL2023 launch template; encrypted gp3, IMDSv2, SSM and logs. No VPC, security group, ASG or application. Choose ASG subnets; without a template security group, instances use the target VPC default group. Provide outbound access to package repositories, SSM and CloudWatch Logs.'
       : 'Private AL2023 instance; encrypted gp3, IMDSv2, SSM, logs and status alarm. Creates a VPC and one NAT gateway; no inbound access.',
   );
   const t = p.template,
@@ -227,7 +227,7 @@ function compute(asg: boolean) {
     Description: 'CPU architecture; selects the matching AL2023 AMI and micro instance type.',
   };
   t.Conditions = { IsArm64: { 'Fn::Equals': [ref('Architecture'), 'arm64'] } };
-  network(t);
+  if (!templateOnly) network(t);
   r.AppLogs = logs('ec2');
   r.InstanceRole = role(
     'ec2.amazonaws.com',
@@ -245,19 +245,19 @@ function compute(asg: boolean) {
     },
   );
   r.InstanceProfile = resource('AWS::IAM::InstanceProfile', { Roles: [ref('InstanceRole')] });
-  r.InstanceGroup = resource('AWS::EC2::SecurityGroup', {
-    VpcId: ref('Vpc'),
-    GroupDescription: 'Private compute; SSM administration, no SSH',
-    SecurityGroupIngress: [],
-    SecurityGroupEgress: [80, 443].map(port => ({
-      IpProtocol: 'tcp',
-      FromPort: port,
-      ToPort: port,
-      CidrIp: '0.0.0.0/0',
-    })),
-    Tags: tags,
-  });
-  const signalResource = asg ? 'AutoScalingGroup' : 'Instance';
+  if (!templateOnly)
+    r.InstanceGroup = resource('AWS::EC2::SecurityGroup', {
+      VpcId: ref('Vpc'),
+      GroupDescription: 'Private compute; SSM administration, no SSH',
+      SecurityGroupIngress: [],
+      SecurityGroupEgress: [80, 443].map(port => ({
+        IpProtocol: 'tcp',
+        FromPort: port,
+        ToPort: port,
+        CidrIp: '0.0.0.0/0',
+      })),
+      Tags: tags,
+    });
   const agent = {
     logs: {
       logs_collected: {
@@ -268,16 +268,20 @@ function compute(asg: boolean) {
               log_group_name: '${AppLogs}',
               log_stream_name: '{instance_id}/system',
             },
-            {
-              file_path: '/var/log/nginx/access.log',
-              log_group_name: '${AppLogs}',
-              log_stream_name: '{instance_id}/access',
-            },
-            {
-              file_path: '/var/log/nginx/error.log',
-              log_group_name: '${AppLogs}',
-              log_stream_name: '{instance_id}/error',
-            },
+            ...(!templateOnly
+              ? [
+                  {
+                    file_path: '/var/log/nginx/access.log',
+                    log_group_name: '${AppLogs}',
+                    log_stream_name: '{instance_id}/access',
+                  },
+                  {
+                    file_path: '/var/log/nginx/error.log',
+                    log_group_name: '${AppLogs}',
+                    log_stream_name: '{instance_id}/error',
+                  },
+                ]
+              : []),
           ],
         },
       },
@@ -310,9 +314,8 @@ function compute(asg: boolean) {
         {
           DeviceIndex: 0,
           AssociatePublicIpAddress: false,
-          Groups: [ref('InstanceGroup')],
           DeleteOnTermination: true,
-          ...(!asg ? { SubnetId: ref('Subnet1') } : {}),
+          ...(!templateOnly ? { SubnetId: ref('Subnet1'), Groups: [ref('InstanceGroup')] } : {}),
         },
       ],
       TagSpecifications: ['instance', 'volume', 'network-interface'].map(ResourceType => ({
@@ -322,16 +325,20 @@ function compute(asg: boolean) {
       UserData: {
         'Fn::Base64': sub(`#!/bin/bash
 set -euo pipefail
-dnf install -y aws-cfn-bootstrap
-trap '/opt/aws/bin/cfn-signal -e $? --stack \${AWS::StackName} --resource ${signalResource} --region \${AWS::Region}' EXIT
+${
+  templateOnly
+    ? 'dnf install -y amazon-cloudwatch-agent'
+    : `dnf install -y aws-cfn-bootstrap
+trap '/opt/aws/bin/cfn-signal -e $? --stack \${AWS::StackName} --resource Instance --region \${AWS::Region}' EXIT
 dnf install -y nginx amazon-cloudwatch-agent
-printf '%s\\n' '<!doctype html><html><body>Ready</body></html>' > /usr/share/nginx/html/index.html
+printf '%s\\n' '<!doctype html><html><body>Ready</body></html>' > /usr/share/nginx/html/index.html`
+}
 cat > /opt/aws/amazon-cloudwatch-agent/etc/powertools.json <<'JSON'
 ${JSON.stringify(agent)}
 JSON
 /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/powertools.json
-systemctl enable --now amazon-ssm-agent nginx
-curl -fsS http://127.0.0.1/ >/dev/null
+systemctl enable --now amazon-ssm-agent
+${templateOnly ? '' : 'systemctl enable --now nginx\ncurl -fsS http://127.0.0.1/ >/dev/null'}
 `),
       },
     },
@@ -340,7 +347,7 @@ curl -fsS http://127.0.0.1/ >/dev/null
     LaunchTemplateId: ref('LaunchTemplate'),
     Version: att('LaunchTemplate', 'LatestVersionNumber'),
   };
-  if (!asg) {
+  if (!templateOnly) {
     r.Instance = resource(
       'AWS::EC2::Instance',
       { LaunchTemplate: launch, DisableApiTermination: true, Tags: namedTags },
@@ -365,158 +372,10 @@ curl -fsS http://127.0.0.1/ >/dev/null
     t.Outputs!.Connect = {
       Value: sub('aws ssm start-session --region ${AWS::Region} --target ${Instance}'),
     };
-  } else {
-    r.ClientGroup = resource('AWS::EC2::SecurityGroup', {
-      VpcId: ref('Vpc'),
-      GroupDescription: 'Attach to authorized clients of the internal ALB',
-      SecurityGroupIngress: [],
-      SecurityGroupEgress: [
-        { IpProtocol: 'tcp', FromPort: 80, ToPort: 80, CidrIp: '10.60.0.0/16' },
-      ],
-      Tags: tags,
-    });
-    r.AlbGroup = resource('AWS::EC2::SecurityGroup', {
-      VpcId: ref('Vpc'),
-      GroupDescription: 'Internal ALB accepts authorized client security group only',
-      SecurityGroupIngress: [
-        { IpProtocol: 'tcp', FromPort: 80, ToPort: 80, SourceSecurityGroupId: ref('ClientGroup') },
-      ],
-      SecurityGroupEgress: [
-        {
-          IpProtocol: 'tcp',
-          FromPort: 80,
-          ToPort: 80,
-          DestinationSecurityGroupId: ref('InstanceGroup'),
-        },
-      ],
-      Tags: tags,
-    });
-    r.ApplicationIngress = resource('AWS::EC2::SecurityGroupIngress', {
-      GroupId: ref('InstanceGroup'),
-      IpProtocol: 'tcp',
-      FromPort: 80,
-      ToPort: 80,
-      SourceSecurityGroupId: ref('AlbGroup'),
-    });
-    r.AccessLogs = bucket({
-      LifecycleConfiguration: {
-        Rules: [
-          {
-            Id: 'Logs',
-            Status: 'Enabled',
-            ExpirationInDays: 30,
-            NoncurrentVersionExpiration: { NoncurrentDays: 30 },
-            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 },
-          },
-        ],
-      },
-    });
-    r.AccessLogsPolicy = resource('AWS::S3::BucketPolicy', {
-      Bucket: ref('AccessLogs'),
-      PolicyDocument: policy(tls('AccessLogs'), {
-        Effect: 'Allow',
-        Principal: { Service: 'logdelivery.elasticloadbalancing.amazonaws.com' },
-        Action: 's3:PutObject',
-        Resource: sub('${AccessLogs.Arn}/alb/AWSLogs/${AWS::AccountId}/*'),
-      }),
-    });
-    r.LoadBalancer = resource(
-      'AWS::ElasticLoadBalancingV2::LoadBalancer',
-      {
-        Scheme: 'internal',
-        Type: 'application',
-        Subnets: [ref('Subnet1'), ref('Subnet2')],
-        SecurityGroups: [ref('AlbGroup')],
-        Tags: tags,
-        LoadBalancerAttributes: [
-          { Key: 'deletion_protection.enabled', Value: 'true' },
-          { Key: 'access_logs.s3.enabled', Value: 'true' },
-          { Key: 'access_logs.s3.bucket', Value: ref('AccessLogs') },
-          { Key: 'access_logs.s3.prefix', Value: 'alb' },
-          { Key: 'routing.http.drop_invalid_header_fields.enabled', Value: 'true' },
-        ],
-      },
-      { DependsOn: 'AccessLogsPolicy' },
-    );
-    r.TargetGroup = resource('AWS::ElasticLoadBalancingV2::TargetGroup', {
-      VpcId: ref('Vpc'),
-      Protocol: 'HTTP',
-      Port: 80,
-      TargetType: 'instance',
-      HealthCheckPath: '/',
-      Tags: tags,
-    });
-    r.Listener = resource('AWS::ElasticLoadBalancingV2::Listener', {
-      LoadBalancerArn: ref('LoadBalancer'),
-      Port: 80,
-      Protocol: 'HTTP',
-      DefaultActions: [{ Type: 'forward', TargetGroupArn: ref('TargetGroup') }],
-    });
-    regionalWaf(t, ref('LoadBalancer'));
-    r.AutoScalingGroup = resource(
-      'AWS::AutoScaling::AutoScalingGroup',
-      {
-        MinSize: '2',
-        MaxSize: '4',
-        DesiredCapacity: '2',
-        VPCZoneIdentifier: [ref('Subnet1'), ref('Subnet2')],
-        LaunchTemplate: launch,
-        TargetGroupARNs: [ref('TargetGroup')],
-        HealthCheckType: 'ELB',
-        HealthCheckGracePeriod: 180,
-        DefaultInstanceWarmup: 180,
-        MetricsCollection: [{ Granularity: '1Minute' }],
-        Tags: namedTags.map(t => ({ ...t, PropagateAtLaunch: true })),
-      },
-      {
-        DependsOn: [
-          'NatRoute',
-          'Association1',
-          'Association2',
-          'PublicAssociation',
-          'Listener',
-          'ApplicationIngress',
-        ],
-        CreationPolicy: { ResourceSignal: { Count: 2, Timeout: 'PT15M' } },
-        UpdatePolicy: {
-          AutoScalingRollingUpdate: {
-            MinInstancesInService: 2,
-            MaxBatchSize: 1,
-            PauseTime: 'PT15M',
-            WaitOnResourceSignals: true,
-          },
-        },
-      },
-    );
-    r.CpuScaling = resource('AWS::AutoScaling::ScalingPolicy', {
-      AutoScalingGroupName: ref('AutoScalingGroup'),
-      PolicyType: 'TargetTrackingScaling',
-      TargetTrackingConfiguration: {
-        PredefinedMetricSpecification: { PredefinedMetricType: 'ASGAverageCPUUtilization' },
-        TargetValue: 60,
-        DisableScaleIn: false,
-      },
-    });
-    r.UnhealthyAlarm = resource('AWS::CloudWatch::Alarm', {
-      Namespace: 'AWS/ApplicationELB',
-      MetricName: 'UnHealthyHostCount',
-      Dimensions: [
-        { Name: 'LoadBalancer', Value: att('LoadBalancer', 'LoadBalancerFullName') },
-        { Name: 'TargetGroup', Value: att('TargetGroup', 'TargetGroupFullName') },
-      ],
-      Statistic: 'Maximum',
-      Period: 60,
-      EvaluationPeriods: 2,
-      Threshold: 1,
-      ComparisonOperator: 'GreaterThanOrEqualToThreshold',
-      TreatMissingData: 'missing',
-      Tags: tags,
-    });
-    t.Outputs!.AutoScalingGroup = { Value: ref('AutoScalingGroup') };
-    t.Outputs!.ClientSecurityGroup = { Value: ref('ClientGroup') };
-    t.Outputs!.ApplicationUrl = { Value: sub('http://${LoadBalancer.DNSName}') };
   }
   t.Outputs!.LaunchTemplateId = { Value: ref('LaunchTemplate') };
+  t.Outputs!.LaunchTemplateVersion = { Value: att('LaunchTemplate', 'LatestVersionNumber') };
+  t.Outputs!.InstanceProfileArn = { Value: att('InstanceProfile') };
   t.Outputs!.Logs = { Value: ref('AppLogs') };
   return p;
 }

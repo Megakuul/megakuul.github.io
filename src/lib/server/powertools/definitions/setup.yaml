@@ -1,6 +1,70 @@
 - id: setup
   title: Setup
   recipes:
+    - id: instance-launch-template
+      title: Instance → AMI + Launch Template
+      env:
+        - name: INSTANCE_ID
+          example: i-0123456789abcdef0
+          required: true
+          hint: EBS-backed instance in the current Region. Captures disk contents, not RAM or running processes. Services must start on boot. Requires AWS CLI and jq.
+        - name: NAME
+          example: my-app-image-v1
+          required: true
+          hint: Use a new name for each capture. Creates an AMI, EBS snapshots and a launch template; no instances are launched.
+        - name: TAG_KEY
+          example: Project
+          required: true
+        - name: TAG_VALUE
+          example: worldskills
+          required: true
+        - name: NO_REBOOT
+          example: 'true'
+          required: false
+          default: 'false'
+          hint: Default reboots the source for consistent disk snapshots. true keeps it running but omits unwritten data; quiesce database/application writes yourself.
+        - name: COPY_USER_DATA
+          example: 'true'
+          required: false
+          default: 'false'
+          hint: Default omits original user data to avoid repeating installation, destructive setup or old CloudFormation signals. true copies it unchanged; review before launching.
+      command: |-
+        (
+          set -euo pipefail
+          : "${INSTANCE_ID:?Set INSTANCE_ID}" "${NAME:?Set NAME}" "${TAG_KEY:?Set TAG_KEY}" "${TAG_VALUE:?Set TAG_VALUE}"
+          export AWS_PAGER="" AWS_DEFAULT_OUTPUT=json
+          case "${NO_REBOOT:-false}" in true) reboot=--no-reboot ;; false) reboot=--reboot ;; *) echo 'NO_REBOOT must be true or false' >&2; exit 1 ;; esac
+          case "${COPY_USER_DATA:-false}" in true|false) ;; *) echo 'COPY_USER_DATA must be true or false' >&2; exit 1 ;; esac
+          d=$(mktemp -d)
+          trap 'rm -rf "$d"' EXIT
+          aws ec2 describe-instances --instance-ids "$INSTANCE_ID" > "$d/instance.json"
+          jq -e '.Reservations[0].Instances[0] | .RootDeviceType == "ebs" and (.State.Name == "running" or .State.Name == "stopped")' "$d/instance.json" >/dev/null
+          aws ec2 get-launch-template-data --instance-id "$INSTANCE_ID" --query LaunchTemplateData > "$d/source.json"
+          jq -e '.InstanceType | type == "string" and length > 0' "$d/source.json" >/dev/null
+          tags=$(jq -cn --arg k "$TAG_KEY" --arg v "$TAG_VALUE" --arg n "$NAME" '[{Key:$k,Value:$v}] + (if $k == "Name" then [] else [{Key:"Name",Value:$n}] end)')
+          image_tags=$(jq -cn --argjson tags "$tags" '["image","snapshot"] | map({ResourceType:.,Tags:$tags})')
+          # By default this REBOOTS the source. The AMI/snapshots remain if a later step fails.
+          AMI_ID=$(aws ec2 create-image --instance-id "$INSTANCE_ID" --name "$NAME" "$reboot" --tag-specifications "$image_tags" --query ImageId --output text)
+          printf 'AMI_ID=%s\n' "$AMI_ID"
+          # If the waiter times out, wait again for this AMI; do not create another image.
+          aws ec2 wait image-available --image-ids "$AMI_ID"
+          # Inherit disks from the NEW AMI, never old snapshot IDs or source ENIs/IPs/placement.
+          jq --arg image "$AMI_ID" --argjson tags "$tags" --argjson copy "${COPY_USER_DATA:-false}" '
+            . as $source |
+            {ImageId:$image, InstanceType:.InstanceType, EbsOptimized:.EbsOptimized,
+             IamInstanceProfile:.IamInstanceProfile, CpuOptions:.CpuOptions,
+             CreditSpecification:.CreditSpecification,
+             MetadataOptions:((.MetadataOptions // {}) + {HttpTokens:"required"}),
+             Monitoring:{Enabled:true},
+             NetworkInterfaces:[{DeviceIndex:0,AssociatePublicIpAddress:false,DeleteOnTermination:true}],
+             TagSpecifications:(["instance","volume","network-interface"] | map({ResourceType:.,Tags:$tags}))}
+            + (if $copy then {UserData:$source.UserData} else {} end)
+            | with_entries(select(.value != null))
+          ' "$d/source.json" > "$d/launch-template.json"
+          # No SG/subnet: choose the ASG subnets; instances use that VPC's default SG.
+          # For custom SGs, create a template version with NetworkInterfaces[0].Groups.
+          aws ec2 create-launch-template --launch-template-name "$NAME" --version-description "Captured from $INSTANCE_ID using $AMI_ID" --launch-template-data "file://$d/launch-template.json" --tag-specifications "$(jq -cn --argjson tags "$tags" '[{ResourceType:"launch-template",Tags:$tags}]')" --query 'LaunchTemplate.{LaunchTemplateId:LaunchTemplateId,Version:LatestVersionNumber}'
+        )
     - id: ecs-account-setup
       title: ECS Account Defaults
       env:
