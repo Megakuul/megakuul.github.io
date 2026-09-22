@@ -1,11 +1,31 @@
 <script lang="ts">
   import { exampleExport, environmentHint } from '$lib/powertools/environment';
+  import type { CommandPlatform } from '$lib/powertools/platform';
+  import { onMount } from 'svelte';
   import SidebarNav from '../SidebarNav.svelte';
 
   let { data } = $props();
   let menuOpen = $state(false);
   let copiedId = $state('');
   let copyError = $state('');
+  let platform = $state<CommandPlatform>('linux');
+  onMount(() => {
+    try {
+      if (localStorage.getItem('powertools-platform') === 'windows') platform = 'windows';
+    } catch {
+      /* Storage may be disabled. The toggle still works. */
+    }
+  });
+  function changePlatform(value: CommandPlatform) {
+    platform = value;
+    copiedId = '';
+    copyError = '';
+    try {
+      localStorage.setItem('powertools-platform', value);
+    } catch {
+      /* Optional preference. */
+    }
+  }
   let commandModes = $state<Record<string, 'cfn' | 'cli' | 'serviceOnly'>>({});
   let items = $derived(
     data.groups.flatMap(group => [
@@ -39,10 +59,26 @@
 </svelte:head>
 
 <div class="sticky top-0 z-30 border-b border-white/5 bg-[rgb(17,16,16)]/90 backdrop-blur-md">
-  <div class="mx-auto flex max-w-350 items-center gap-3 px-4 py-3">
+  <div class="mx-auto flex max-w-350 flex-wrap items-center gap-3 px-4 py-3">
     <a href="/worldskills" class="shrink-0 text-sm text-slate-400 hover:text-white">← worldskills</a
     >
     <h1 class="min-w-0 flex-1 truncate text-lg font-bold">Powertools</h1>
+    <div
+      class="order-last flex w-full shrink-0 gap-1 sm:order-none sm:w-auto"
+      role="group"
+      aria-label="Command platform"
+    >
+      <button
+        class="copy-button"
+        aria-pressed={platform === 'linux'}
+        onclick={() => changePlatform('linux')}>Linux</button
+      >
+      <button
+        class="copy-button"
+        aria-pressed={platform === 'windows'}
+        onclick={() => changePlatform('windows')}>Windows</button
+      >
+    </div>
     <button
       class="copy-button lg:hidden"
       aria-expanded={menuOpen}
@@ -54,6 +90,11 @@
 <div class="mx-auto flex w-full max-w-350 gap-8 px-4" style="--sidebar-active-border: #94a3b8">
   <SidebarNav {items} bind:menuOpen />
   <main class="min-w-0 flex-1 space-y-8 py-6">
+    <p class="text-sm text-slate-400">
+      {platform === 'windows'
+        ? 'CloudFormation and setup commands support Windows PowerShell 5.1 with AWS CLI v2 and curl.exe. Direct AWS CLI recipes require PowerShell 7.4+ (pwsh) and jq.'
+        : 'Run in Bash with AWS CLI v2. Direct AWS CLI recipes also use jq.'}
+    </p>
     {#each data.groups as group}
       <section aria-labelledby={group.id}>
         <h2 id={group.id} class="mb-3 scroll-mt-24 text-2xl font-bold">{group.title}</h2>
@@ -62,8 +103,22 @@
             {@const mode = commandModes[snippet.id] ?? 'cfn'}
             {@const isCli = mode === 'cli'}
             {@const deployment = mode === 'serviceOnly' ? snippet.serviceOnly! : snippet}
-            {@const command = isCli ? snippet.cliCommand! : deployment.command}
-            {@const commandHtml = isCli ? snippet.cliHtml! : deployment.commandHtml}
+            {@const command =
+              platform === 'windows'
+                ? isCli
+                  ? snippet.windowsCliCommand!
+                  : deployment.windowsCommand
+                : isCli
+                  ? snippet.cliCommand!
+                  : deployment.command}
+            {@const commandHtml =
+              platform === 'windows'
+                ? isCli
+                  ? snippet.windowsCliHtml!
+                  : deployment.windowsCommandHtml
+                : isCli
+                  ? snippet.cliHtml!
+                  : deployment.commandHtml}
             <article
               id={snippet.id}
               class="min-w-0 scroll-mt-24 overflow-hidden rounded-xl border border-white/10 bg-white/[0.02]"
@@ -134,10 +189,13 @@
                     <button
                       class="env-variable"
                       class:required={variable.required}
-                      title={environmentHint(variable)}
-                      aria-label={`${variable.name}: ${environmentHint(variable)}`}
+                      title={environmentHint(variable, platform)}
+                      aria-label={`${variable.name}: ${environmentHint(variable, platform)}`}
                       onclick={() =>
-                        copy(snippet.id + '-env-' + variable.name, exampleExport(variable))}
+                        copy(
+                          snippet.id + '-env-' + variable.name,
+                          exampleExport(variable, platform),
+                        )}
                     >
                       {variable.name}{variable.required ? ' *' : ''}{copiedId ===
                       snippet.id + '-env-' + variable.name
@@ -165,9 +223,7 @@
               {#if !snippet.documentOnly && deployment.documentCode !== null && deployment.documentHtml !== null}
                 <details class="border-t border-white/10">
                   <summary class="cursor-pointer px-4 py-2.5 text-sm text-slate-300"
-                    >{snippet.documentTitle}{mode === 'serviceOnly'
-                      ? ' service only'
-                      : ''}</summary
+                    >{snippet.documentTitle}{mode === 'serviceOnly' ? ' service only' : ''}</summary
                   >
                   <div class="flex justify-end px-4 pb-2">
                     <button

@@ -8,6 +8,7 @@ import roles from './definitions/roles.yaml?raw';
 import policies from './definitions/policies.yaml?raw';
 import { infrastructureTools } from './infrastructure';
 import { encryptLogGroups } from './log-encryption';
+import { windowsSetupCommand } from './setup-commands';
 
 const definitions = [environment, setup, services, roles, policies]
   .flatMap(source => parse(source) as DefinitionGroup[])
@@ -41,7 +42,7 @@ export function powertoolsGroups(): ToolGroup[] {
               cli === 'security' ? securityCommand(template) : cli === false ? false : undefined,
             )
           : command
-            ? { command }
+            ? { command, windowsCommand: windowsSetupCommand({ id, title, env, command }) }
             : { document: policy }),
       }),
     ),

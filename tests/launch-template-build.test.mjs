@@ -45,8 +45,35 @@ test('both compute downloads select a matching AMI and instance type', () => {
   }
   const ec2 = template('ec2');
   assert.ok(ec2.Resources.InstanceGroup);
-  assert.match(
+  assert.doesNotMatch(
     ec2.Resources.LaunchTemplate.Properties.LaunchTemplateData.UserData['Fn::Base64'],
-    /--resource Instance/,
+    /nginx|cfn-signal|Ready<\/body>/,
   );
+});
+
+test('EC2 uses the supplied network and only opens the requested SSH CIDR', () => {
+  const ec2 = template('ec2');
+  const resources = ec2.Resources;
+  assert.ok(
+    !Object.values(resources).some(r =>
+      /^AWS::EC2::(VPC|Subnet|Route|RouteTable|NatGateway|InternetGateway|EIP|VPCEndpoint|FlowLog|VPCGatewayAttachment|SubnetRouteTableAssociation)$/.test(
+        r.Type,
+      ),
+    ),
+  );
+  assert.equal(ec2.Parameters.VpcId.Type, 'AWS::EC2::VPC::Id');
+  assert.equal(ec2.Parameters.SubnetId.Type, 'AWS::EC2::Subnet::Id');
+  assert.equal(resources.InstanceGroup.Properties.VpcId, 'VpcId');
+  assert.deepEqual(resources.InstanceGroup.Properties.SecurityGroupIngress, [
+    { IpProtocol: 'tcp', FromPort: 22, ToPort: 22, CidrIp: 'SshCidr' },
+  ]);
+  const data = resources.LaunchTemplate.Properties.LaunchTemplateData;
+  assert.equal(resources.SshKey.Type, 'AWS::EC2::KeyPair');
+  assert.equal(resources.SshKey.Properties.PublicKeyMaterial, 'PublicKeyMaterial');
+  assert.equal(data.KeyName, 'SshKey');
+  assert.equal(data.NetworkInterfaces[0].SubnetId, 'SubnetId');
+  assert.deepEqual(data.NetworkInterfaces[0].Groups, ['InstanceGroup']);
+  assert.equal(resources.Instance.DependsOn, undefined);
+  assert.equal(resources.Instance.CreationPolicy, undefined);
+  assert.ok(ec2.Rules.SubnetInVpc);
 });

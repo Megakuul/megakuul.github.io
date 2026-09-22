@@ -108,108 +108,13 @@ function base(
     },
   };
 }
-function network(t: CloudFormationTemplate) {
-  const r = t.Resources;
-  r.Vpc = resource('AWS::EC2::VPC', {
-    CidrBlock: '10.60.0.0/16',
-    EnableDnsSupport: true,
-    EnableDnsHostnames: true,
-    Tags: namedTags,
-  });
-  r.Gateway = resource('AWS::EC2::InternetGateway', { Tags: tags });
-  r.GatewayAttachment = resource('AWS::EC2::VPCGatewayAttachment', {
-    VpcId: ref('Vpc'),
-    InternetGatewayId: ref('Gateway'),
-  });
-  r.PublicSubnet = resource('AWS::EC2::Subnet', {
-    VpcId: ref('Vpc'),
-    CidrBlock: '10.60.0.0/24',
-    AvailabilityZone: { 'Fn::Select': [0, { 'Fn::GetAZs': '' }] },
-    MapPublicIpOnLaunch: false,
-    Tags: tags,
-  });
-  r.PublicRoutes = resource('AWS::EC2::RouteTable', { VpcId: ref('Vpc'), Tags: tags });
-  r.PublicAssociation = resource('AWS::EC2::SubnetRouteTableAssociation', {
-    SubnetId: ref('PublicSubnet'),
-    RouteTableId: ref('PublicRoutes'),
-  });
-  r.InternetRoute = resource(
-    'AWS::EC2::Route',
-    {
-      RouteTableId: ref('PublicRoutes'),
-      DestinationCidrBlock: '0.0.0.0/0',
-      GatewayId: ref('Gateway'),
-    },
-    { DependsOn: 'GatewayAttachment' },
-  );
-  r.NatAddress = resource('AWS::EC2::EIP', { Domain: 'vpc', Tags: tags });
-  r.Nat = resource(
-    'AWS::EC2::NatGateway',
-    { AllocationId: att('NatAddress', 'AllocationId'), SubnetId: ref('PublicSubnet'), Tags: tags },
-    { DependsOn: 'InternetRoute' },
-  );
-  r.PrivateRoutes = resource('AWS::EC2::RouteTable', { VpcId: ref('Vpc'), Tags: tags });
-  r.NatRoute = resource('AWS::EC2::Route', {
-    RouteTableId: ref('PrivateRoutes'),
-    DestinationCidrBlock: '0.0.0.0/0',
-    NatGatewayId: ref('Nat'),
-  });
-  for (const i of [1, 2]) {
-    r[`Subnet${i}`] = resource('AWS::EC2::Subnet', {
-      VpcId: ref('Vpc'),
-      CidrBlock: `10.60.${i + 9}.0/24`,
-      AvailabilityZone: { 'Fn::Select': [i - 1, { 'Fn::GetAZs': '' }] },
-      MapPublicIpOnLaunch: false,
-      Tags: tags,
-    });
-    r[`Association${i}`] = resource('AWS::EC2::SubnetRouteTableAssociation', {
-      SubnetId: ref(`Subnet${i}`),
-      RouteTableId: ref('PrivateRoutes'),
-    });
-  }
-  for (const service of ['s3', 'dynamodb'])
-    r[`${service}Endpoint`] = resource('AWS::EC2::VPCEndpoint', {
-      VpcId: ref('Vpc'),
-      VpcEndpointType: 'Gateway',
-      ServiceName: sub('com.amazonaws.${AWS::Region}.' + service),
-      RouteTableIds: [ref('PrivateRoutes')],
-      Tags: tags,
-    });
-  r.FlowLogs = logs('vpc');
-  r.FlowRole = role('vpc-flow-logs.amazonaws.com', [
-    allow(
-      ['logs:CreateLogStream', 'logs:PutLogEvents', 'logs:DescribeLogStreams'],
-      att('FlowLogs'),
-    ),
-    allow('logs:DescribeLogGroups', '*'),
-  ]);
-  r.FlowRole.Properties!.AssumeRolePolicyDocument.Statement[0].Condition = {
-    StringEquals: { 'aws:SourceAccount': ref('AWS::AccountId') },
-    ArnLike: {
-      'aws:SourceArn': sub(
-        'arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:vpc-flow-log/*',
-      ),
-    },
-  };
-  r.FlowLog = resource('AWS::EC2::FlowLog', {
-    ResourceType: 'VPC',
-    ResourceId: ref('Vpc'),
-    TrafficType: 'ALL',
-    LogDestinationType: 'cloud-watch-logs',
-    LogGroupName: ref('FlowLogs'),
-    DeliverLogsPermissionArn: att('FlowRole'),
-    MaxAggregationInterval: 60,
-    Tags: tags,
-  });
-  t.Outputs!.VpcId = { Value: ref('Vpc') };
-}
 function compute(templateOnly: boolean) {
   const p = base(
     templateOnly ? 'asg' : 'ec2',
     templateOnly ? 'Launch Template' : 'EC2',
     templateOnly
       ? 'Reusable AL2023 launch template; encrypted gp3, IMDSv2, SSM and logs. No VPC, security group, ASG or application. Choose ASG subnets; without a template security group, instances use the target VPC default group. Provide outbound access to package repositories, SSM and CloudWatch Logs.'
-      : 'Private AL2023 instance; encrypted gp3, IMDSv2, SSM, logs and status alarm. Creates a VPC and one NAT gateway; no inbound access.',
+      : 'AL2023 instance in your existing VPC; selects the first available subnet by AZ and subnet ID. Creates an SSH security group, encrypted gp3 storage, IMDSv2, SSM, logs and a status alarm. Generates a local SSH key (OpenSSH required; PowerShell 7.3+ on Windows), imports its public key, waits for deployment and prints the SSH command. Uses existing subnet routing and public-IP settings.',
   );
   const t = p.template,
     r = t.Resources;
@@ -227,7 +132,58 @@ function compute(templateOnly: boolean) {
     Description: 'CPU architecture; selects the matching AL2023 AMI and micro instance type.',
   };
   t.Conditions = { IsArm64: { 'Fn::Equals': [ref('Architecture'), 'arm64'] } };
-  if (!templateOnly) network(t);
+  if (!templateOnly) {
+    p.env!.push(
+      {
+        name: 'VPC_ID',
+        example: 'vpc-0123456789abcdef0',
+        required: true,
+        hint: 'Existing VPC. The command selects an existing subnet in its first available AZ; no subnet or routing is created.',
+      },
+      {
+        name: 'SSH_CIDR',
+        example: '203.0.113.10/32',
+        required: true,
+        hint: 'Client IPv4 CIDR allowed to connect on TCP 22.',
+      },
+    );
+    t.Parameters.VpcId = { Type: 'AWS::EC2::VPC::Id' };
+    t.Parameters.SubnetId = {
+      Type: 'AWS::EC2::Subnet::Id',
+      Description: 'Existing subnet in VpcId; selected automatically by the deployment command.',
+    };
+    t.Parameters.SshCidr = {
+      Type: 'String',
+      Description: 'Client IPv4 CIDR allowed to connect on TCP 22.',
+      AllowedPattern: '([0-9]{1,3}[.]){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])',
+    };
+    t.Parameters.PublicKeyMaterial = {
+      Type: 'String',
+      Description:
+        'Public SSH key generated locally by the deployment snippet. Never provide the private key.',
+      AllowedPattern: 'ssh-ed25519 [A-Za-z0-9+/=]+( .*)?',
+    };
+    r.SshKey = resource('AWS::EC2::KeyPair', {
+      KeyName: sub('${AWS::StackName}-ssh'),
+      PublicKeyMaterial: ref('PublicKeyMaterial'),
+      Tags: tags,
+    });
+    t.Rules = {
+      SubnetInVpc: {
+        Assertions: [
+          {
+            Assert: {
+              'Fn::EachMemberEquals': [
+                { 'Fn::ValueOfAll': ['AWS::EC2::Subnet::Id', 'VpcId'] },
+                ref('VpcId'),
+              ],
+            },
+            AssertDescription: 'The selected subnet must belong to VPC_ID.',
+          },
+        ],
+      },
+    };
+  }
   r.AppLogs = logs('ec2');
   r.InstanceRole = role(
     'ec2.amazonaws.com',
@@ -247,9 +203,11 @@ function compute(templateOnly: boolean) {
   r.InstanceProfile = resource('AWS::IAM::InstanceProfile', { Roles: [ref('InstanceRole')] });
   if (!templateOnly)
     r.InstanceGroup = resource('AWS::EC2::SecurityGroup', {
-      VpcId: ref('Vpc'),
-      GroupDescription: 'Private compute; SSM administration, no SSH',
-      SecurityGroupIngress: [],
+      VpcId: ref('VpcId'),
+      GroupDescription: 'SSH from the configured client CIDR',
+      SecurityGroupIngress: [
+        { IpProtocol: 'tcp', FromPort: 22, ToPort: 22, CidrIp: ref('SshCidr') },
+      ],
       SecurityGroupEgress: [80, 443].map(port => ({
         IpProtocol: 'tcp',
         FromPort: port,
@@ -268,20 +226,6 @@ function compute(templateOnly: boolean) {
               log_group_name: '${AppLogs}',
               log_stream_name: '{instance_id}/system',
             },
-            ...(!templateOnly
-              ? [
-                  {
-                    file_path: '/var/log/nginx/access.log',
-                    log_group_name: '${AppLogs}',
-                    log_stream_name: '{instance_id}/access',
-                  },
-                  {
-                    file_path: '/var/log/nginx/error.log',
-                    log_group_name: '${AppLogs}',
-                    log_stream_name: '{instance_id}/error',
-                  },
-                ]
-              : []),
           ],
         },
       },
@@ -295,6 +239,7 @@ function compute(templateOnly: boolean) {
         '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-${Architecture}}}',
       ),
       InstanceType: { 'Fn::If': ['IsArm64', 't4g.micro', 't3.micro'] },
+      ...(!templateOnly ? { KeyName: ref('SshKey') } : {}),
       IamInstanceProfile: { Arn: att('InstanceProfile') },
       Monitoring: { Enabled: true },
       EbsOptimized: true,
@@ -313,9 +258,9 @@ function compute(templateOnly: boolean) {
       NetworkInterfaces: [
         {
           DeviceIndex: 0,
-          AssociatePublicIpAddress: false,
+          ...(templateOnly ? { AssociatePublicIpAddress: false } : {}),
           DeleteOnTermination: true,
-          ...(!templateOnly ? { SubnetId: ref('Subnet1'), Groups: [ref('InstanceGroup')] } : {}),
+          ...(!templateOnly ? { SubnetId: ref('SubnetId'), Groups: [ref('InstanceGroup')] } : {}),
         },
       ],
       TagSpecifications: ['instance', 'volume', 'network-interface'].map(ResourceType => ({
@@ -325,20 +270,13 @@ function compute(templateOnly: boolean) {
       UserData: {
         'Fn::Base64': sub(`#!/bin/bash
 set -euo pipefail
-${
-  templateOnly
-    ? 'dnf install -y amazon-cloudwatch-agent'
-    : `dnf install -y aws-cfn-bootstrap
-trap '/opt/aws/bin/cfn-signal -e $? --stack \${AWS::StackName} --resource Instance --region \${AWS::Region}' EXIT
-dnf install -y nginx amazon-cloudwatch-agent
-printf '%s\\n' '<!doctype html><html><body>Ready</body></html>' > /usr/share/nginx/html/index.html`
-}
+dnf install -y amazon-cloudwatch-agent
 cat > /opt/aws/amazon-cloudwatch-agent/etc/powertools.json <<'JSON'
 ${JSON.stringify(agent)}
 JSON
 /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/powertools.json
 systemctl enable --now amazon-ssm-agent
-${templateOnly ? '' : 'systemctl enable --now nginx\ncurl -fsS http://127.0.0.1/ >/dev/null'}
+
 `),
       },
     },
@@ -348,14 +286,11 @@ ${templateOnly ? '' : 'systemctl enable --now nginx\ncurl -fsS http://127.0.0.1/
     Version: att('LaunchTemplate', 'LatestVersionNumber'),
   };
   if (!templateOnly) {
-    r.Instance = resource(
-      'AWS::EC2::Instance',
-      { LaunchTemplate: launch, DisableApiTermination: true, Tags: namedTags },
-      {
-        DependsOn: ['NatRoute', 'Association1', 'PublicAssociation'],
-        CreationPolicy: { ResourceSignal: { Count: 1, Timeout: 'PT15M' } },
-      },
-    );
+    r.Instance = resource('AWS::EC2::Instance', {
+      LaunchTemplate: launch,
+      DisableApiTermination: true,
+      Tags: namedTags,
+    });
     r.StatusAlarm = resource('AWS::CloudWatch::Alarm', {
       Namespace: 'AWS/EC2',
       MetricName: 'StatusCheckFailed',
@@ -369,6 +304,10 @@ ${templateOnly ? '' : 'systemctl enable --now nginx\ncurl -fsS http://127.0.0.1/
       Tags: tags,
     });
     t.Outputs!.InstanceId = { Value: ref('Instance') };
+    t.Outputs!.VpcId = { Value: ref('VpcId') };
+    t.Outputs!.SubnetId = { Value: ref('SubnetId') };
+    t.Outputs!.SecurityGroupId = { Value: ref('InstanceGroup') };
+    t.Outputs!.PrivateIp = { Value: att('Instance', 'PrivateIp') };
     t.Outputs!.Connect = {
       Value: sub('aws ssm start-session --region ${AWS::Region} --target ${Instance}'),
     };

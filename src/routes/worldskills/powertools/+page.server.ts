@@ -7,9 +7,11 @@ import type { PageServerLoad } from './$types';
 export const load: PageServerLoad = async () => {
   const highlighter = await createHighlighter({
     themes: [dracula],
-    langs: ['bash', 'json', 'yaml'],
+    langs: ['bash', 'powershell', 'json', 'yaml'],
   });
-  const render = (recipe: Pick<Recipe, 'command' | 'templateFile' | 'document' | 'cfnTagNote'>) => {
+  const render = (
+    recipe: Pick<Recipe, 'command' | 'windowsCommand' | 'templateFile' | 'document' | 'cfnTagNote'>,
+  ) => {
     const command = recipe.command ?? '',
       documentLanguage = recipe.templateFile ? 'yaml' : 'json',
       documentCode = recipe.document
@@ -23,6 +25,11 @@ export const load: PageServerLoad = async () => {
         ? `/worldskills/powertools/templates/${recipe.templateFile}`
         : null,
       command,
+      windowsCommand: recipe.windowsCommand ?? '',
+      windowsCommandHtml: highlighter.codeToHtml(recipe.windowsCommand ?? '', {
+        lang: 'powershell',
+        theme: 'dracula',
+      }),
       cfnTagNote: recipe.cfnTagNote ?? null,
       commandHtml: highlighter.codeToHtml(
         recipe.templateFile
@@ -50,6 +57,13 @@ export const load: PageServerLoad = async () => {
           cliEnv: null,
           documentOnly: !recipe.command,
           cliCommand: recipe.cliCommand ?? null,
+          windowsCliCommand: recipe.windowsCliCommand ?? null,
+          windowsCliHtml: recipe.windowsCliCommand
+            ? highlighter.codeToHtml(recipe.windowsCliCommand, {
+                lang: 'powershell',
+                theme: 'dracula',
+              })
+            : null,
           cliHtml: recipe.cliCommand
             ? highlighter.codeToHtml(recipe.cliCommand, { lang: 'bash', theme: 'dracula' })
             : null,

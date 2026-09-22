@@ -38,8 +38,11 @@ export interface Recipe {
   env?: EnvVariable[];
   command?: string;
   cliCommand?: string;
+  windowsCommand?: string;
+  windowsCliCommand?: string;
   serviceOnly?: {
     command: string;
+    windowsCommand: string;
     templateFile: string;
     document: CloudFormationTemplate;
     cfnTagNote: string | null;

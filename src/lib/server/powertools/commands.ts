@@ -1,5 +1,7 @@
 import { lambdaZip } from './lambda-zip';
 import type { CloudFormationTemplate, Recipe } from '$lib/powertools/types';
+import { powershellQuote as psQuote, type CommandPlatform } from '$lib/powertools/platform';
+import { requiredEnvironment, powershellScript } from './powershell';
 /** Render CloudFormation submissions and emergency CLI commands from the same template. */
 const quote = (s: string) => "'" + s.replaceAll("'", "'\"'\"'") + "'";
 const expr = (code: string) => ({ __jq: code });
@@ -294,6 +296,7 @@ export function creationCommands(
     const file = templateFile(`${kind}-service-only`);
     serviceOnly = {
       command: cfnCommand(document, kind, inputs, file),
+      windowsCommand: cfnCommand(document, kind, inputs, file, 'windows'),
       templateFile: file,
       document,
       cfnTagNote: cfnTagNote(document, !!cli),
@@ -301,7 +304,14 @@ export function creationCommands(
   }
   return {
     command: cfnCommand(resourceTemplate, kind, inputs),
+    windowsCommand: cfnCommand(resourceTemplate, kind, inputs, templateFile(kind), 'windows'),
     cliCommand: cli,
+    windowsCliCommand:
+      cliOverride === false
+        ? undefined
+        : cliOverride
+          ? securityCommand(resourceTemplate, 'windows')
+          : directCommand(resourceTemplate, kind, inputs, 'windows'),
     serviceOnly,
     resourceTemplate,
     document: resourceTemplate,
@@ -316,6 +326,7 @@ function cfnCommand(
   kind: string,
   inputs: string[] = ['NAME'],
   file = templateFile(kind),
+  platform: CommandPlatform = 'linux',
 ) {
   if (JSON.stringify(template.Resources).includes('Custom::'))
     throw Error('Deployment custom resources are not allowed');
@@ -329,6 +340,9 @@ function cfnCommand(
     ServiceAccount: 'SERVICE_ACCOUNT',
     VpcId: 'VPC_ID',
     SubnetIds: 'SUBNET_IDS',
+    SubnetId: 'SUBNET_ID',
+    SshCidr: 'SSH_CIDR',
+    PublicKeyMaterial: 'PUBLIC_KEY',
     GroupNames: 'SG_NAMES',
     TargetArn: 'TARGET_ARN',
     EcrRepository: 'ECR_REPOSITORY',
@@ -340,39 +354,124 @@ function cfnCommand(
   const parameterNames = Object.keys(template.Parameters).sort(
     (a, b) => Number(!a.startsWith('Tag')) - Number(!b.startsWith('Tag')),
   );
+  const windows = platform === 'windows';
+  const defaults: Record<string, string> = {
+    Architecture: 'x86_64',
+    EnableIpv6: 'false',
+    EnableLambdaAuthorizer: 'false',
+    DeploymentId: '',
+  };
+  const required: string[] = ['TAG_KEY', 'TAG_VALUE'];
   const parameters = parameterNames.map(key => {
-    const value =
-      key === 'RoleArn'
-        ? '$(aws iam get-role --role-name "${ROLE_NAME:?Set ROLE_NAME}" --query Role.Arn --output text)'
-        : key === 'Architecture'
-          ? '${ARCHITECTURE:-x86_64}'
-          : key === 'EnableIpv6'
-            ? '${ENABLE_IPV6:-false}'
-            : key === 'EnableLambdaAuthorizer'
-              ? '${ENABLE_LAMBDA_AUTHORIZER:-false}'
-              : key === 'DeploymentId'
-                ? '${DEPLOYMENT_ID:-}'
-                : `\${${envParams[key]}:?Set ${envParams[key]}}`;
-    if (!envParams[key] && key !== 'RoleArn') throw Error('Unexpected bootstrap parameter: ' + key);
-    return `ParameterKey=${key},ParameterValue="${['GroupNames', 'SubnetIds'].includes(key) ? "'" + value + "'" : value}"`;
+    const variable = key === 'RoleArn' ? 'ROLE_NAME' : envParams[key];
+    if (!variable) throw Error('Unexpected bootstrap parameter: ' + key);
+    if (!(key in defaults) && !(kind === 'ec2' && ['SubnetId', 'PublicKeyMaterial'].includes(key)))
+      required.push(variable);
+    let value: string;
+    if (kind === 'ec2' && key === 'SubnetId') {
+      value = windows ? '$subnetId' : '$SUBNET_ID';
+    } else if (kind === 'ec2' && key === 'PublicKeyMaterial') {
+      value = windows ? '$publicKey' : '$(cat "$KEY_FILE.pub")';
+    } else if (key === 'RoleArn') {
+      value = windows
+        ? "$(aws iam get-role --role-name $env:ROLE_NAME --query Role.Arn --output text; if ($LASTEXITCODE -ne 0) { throw 'Role lookup failed' })"
+        : '$(aws iam get-role --role-name "${ROLE_NAME:?Set ROLE_NAME}" --query Role.Arn --output text)';
+    } else if (key in defaults) {
+      value = windows
+        ? `$(if ($env:${variable}) { $env:${variable} } else { ${psQuote(defaults[key])} })`
+        : `\${${variable}:-${defaults[key]}}`;
+    } else {
+      value = windows ? `$env:${variable}` : `\${${variable}:?Set ${variable}}`;
+    }
+    if (['GroupNames', 'SubnetIds'].includes(key)) value = "'" + value + "'";
+    return windows
+      ? `"ParameterKey=${key},ParameterValue=${value}"`
+      : `ParameterKey=${key},ParameterValue="${value}"`;
   });
   const capabilities = [];
   if (Object.values(template.Resources).some(r => r.Type?.startsWith('AWS::IAM::')))
     capabilities.push('CAPABILITY_NAMED_IAM');
   if (template.Transform) capabilities.push('CAPABILITY_AUTO_EXPAND');
+  const name = windows
+    ? stackName(kind, inputs).replace(
+        /\$\{([A-Z_]+)\/\/\[\^a-zA-Z0-9-\]\/-\}/g,
+        (_, variable) => `$($env:${variable} -replace '[^a-zA-Z0-9-]', '-')`,
+      )
+    : stackName(kind, inputs);
   const deploy = [
-    `aws cloudformation create-stack${kind === 'cloudfront' ? ' --region us-east-1' : ''} --stack-name "${stackName(kind, inputs)}"`,
+    `aws cloudformation create-stack${kind === 'cloudfront' ? ' --region us-east-1' : ''} --stack-name "${name}"`,
     `--template-body file://${file}`,
     parameters.length ? '--parameters ' + parameters.join(' ') : '',
-    '--tags "Key=${TAG_KEY:?Set TAG_KEY},Value=${TAG_VALUE:?Set TAG_VALUE}"',
+    windows
+      ? '--tags "Key=$env:TAG_KEY,Value=$env:TAG_VALUE"'
+      : '--tags "Key=${TAG_KEY:?Set TAG_KEY},Value=${TAG_VALUE:?Set TAG_VALUE}"',
     capabilities.length ? '--capabilities ' + capabilities.join(' ') : '',
   ]
     .filter(Boolean)
     .join(' ');
-  return `curl -fsSL https://megakuul.github.io/worldskills/powertools/templates/${file} -o ${file} && ${deploy}`;
+  const download = `curl${windows ? '.exe' : ''} -fsSL https://megakuul.github.io/worldskills/powertools/templates/${file} -o ${file}`;
+  const subnetQuery =
+    'sort_by(sort_by(Subnets[AvailableIpAddressCount > `0`], &SubnetId), &AvailabilityZone)[0].SubnetId';
+  const subnetLookup =
+    kind === 'ec2'
+      ? windows
+        ? `; $subnetId = aws ec2 describe-subnets --filters "Name=vpc-id,Values=$env:VPC_ID" "Name=state,Values=available" --query ${psQuote(subnetQuery)} --output text; if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($subnetId) -or $subnetId -eq 'None') { throw 'No available subnet found in VPC_ID' }`
+        : `SUBNET_ID=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=\${VPC_ID:?Set VPC_ID}" "Name=state,Values=available" --query ${quote(subnetQuery)} --output text) && [ -n "$SUBNET_ID" ] && [ "$SUBNET_ID" != None ]`
+      : '';
+  if (kind === 'ec2') {
+    const instanceQuery = "Stacks[0].Outputs[?OutputKey=='InstanceId'].OutputValue | [0]";
+    const addressQuery =
+      'Reservations[0].Instances[0] | not_null(PublicIpAddress, PrivateIpAddress)';
+    if (windows) {
+      const checked = (command: string) =>
+        `${command}; if ($LASTEXITCODE -ne 0) { throw 'Command failed; see error above' }`;
+      return [
+        `${requiredEnvironment(required)}${subnetLookup}`,
+        checked(download),
+        `if ($PSVersionTable.PSVersion -lt [version]'7.3') { throw 'Use PowerShell 7.3+ for SSH key generation' }; $PSNativeCommandArgumentPassing = 'Standard'`,
+        `$keyFile = "${name}.key"; if ((Test-Path -LiteralPath $keyFile) -or (Test-Path -LiteralPath "$keyFile.pub")) { throw "Key already exists: $keyFile; choose a new NAME" }`,
+        checked(`ssh-keygen -q -t ed25519 -N '' -C powertools -f $keyFile`),
+        '$publicKey = (Get-Content -Raw -LiteralPath "$keyFile.pub" -ErrorAction Stop).Trim()',
+        checked(deploy),
+        checked(`aws cloudformation wait stack-create-complete --stack-name "${name}"`),
+        checked(
+          `$instanceId = aws cloudformation describe-stacks --stack-name "${name}" --query ${psQuote(instanceQuery)} --output text`,
+        ),
+        checked('aws ec2 wait instance-status-ok --instance-ids $instanceId'),
+        checked(
+          `$sshHost = aws ec2 describe-instances --instance-ids $instanceId --query ${psQuote(addressQuery)} --output text`,
+        ),
+        `if ([string]::IsNullOrEmpty($sshHost) -or $sshHost -eq 'None') { throw 'Instance has no SSH address' }; "ssh -i \`"$keyFile\`" ec2-user@$sshHost"`,
+      ].join('\n');
+    }
+    return [
+      ': ' + [...new Set(required)].map(key => `"\${${key}:?Set ${key}}"`).join(' '),
+      subnetLookup,
+      download,
+      `KEY_FILE="${name}.key"`,
+      '[ ! -e "$KEY_FILE" ] && [ ! -e "$KEY_FILE.pub" ]',
+      `ssh-keygen -q -t ed25519 -N '' -C powertools -f "$KEY_FILE"`,
+      deploy,
+      `aws cloudformation wait stack-create-complete --stack-name "${name}"`,
+      `INSTANCE_ID=$(aws cloudformation describe-stacks --stack-name "${name}" --query ${quote(instanceQuery)} --output text)`,
+      'aws ec2 wait instance-status-ok --instance-ids "$INSTANCE_ID"',
+      `SSH_HOST=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --query ${quote(addressQuery)} --output text)`,
+      '[ -n "$SSH_HOST" ] && [ "$SSH_HOST" != None ]',
+      `printf 'ssh -i "%s" ec2-user@%s\\n' "$KEY_FILE" "$SSH_HOST"`,
+    ].join(' &&\n');
+  }
+  return windows
+    ? `${requiredEnvironment(required)}${subnetLookup}\n${download}; if ($LASTEXITCODE -ne 0) { throw 'Template download failed' }\n${deploy}`
+    : `${subnetLookup ? subnetLookup + ' && ' : ''}${download} && ${deploy}`;
 }
+
 /** Build explicit AWS API calls; jq only serializes request JSON. */
-function cliSteps(template: CloudFormationTemplate, skip: string[] = []) {
+function cliSteps(
+  template: CloudFormationTemplate,
+  skip: string[] = [],
+  platform: CommandPlatform = 'linux',
+) {
+  const windows = platform === 'windows';
   const e = compiler(template),
     steps = [];
   const apiBootstrap = Object.values(template.Resources).some(r =>
@@ -387,11 +486,28 @@ function cliSteps(template: CloudFormationTemplate, skip: string[] = []) {
     const retry =
       apiBootstrap &&
       ((service === 'apigateway' && operation === 'update-account') || service === 'wafv2');
-    const command = `${retry ? 'retry_api_setup ' : ''}aws ${service} ${operation} --cli-input-json "$(jq -cn ${quote(e.c(payload))})"`;
-    steps.push(id === 'response' ? command : `result=$(${command})`);
+    const command = windows
+      ? `aws ${service} ${operation} --cli-input-json (jq -cn ${psQuote(e.c(payload))}) --no-cli-pager`
+      : `${retry ? 'retry_api_setup ' : ''}aws ${service} ${operation} --cli-input-json "$(jq -cn ${quote(e.c(payload))})"`;
+    steps.push(
+      id === 'response'
+        ? command
+        : windows
+          ? `$result = (${command}) -join "\`n"`
+          : `result=$(${command})`,
+    );
   };
-  const output = (id: string, field: string, key = 'R') =>
-    steps.push(`${key}_${id}=$(jq -er ${quote(field)} <<<"$result")`, `export ${key}_${id}`);
+  const output = (id: string, field: string, key = 'R') => {
+    if (windows) steps.push(`$env:${key}_${id} = $result | jq -er ${psQuote(field)}`);
+    else steps.push(`${key}_${id}=$(jq -er ${quote(field)} <<<"$result")`, `export ${key}_${id}`);
+  };
+  const namedCommand = (service: string, operation: string, argument: string, value: string) => {
+    steps.push(
+      windows
+        ? `aws ${service} ${operation} ${argument} (jq -nr ${psQuote(value)}) --no-cli-pager`
+        : `aws ${service} ${operation} ${argument} "$(jq -nr ${quote(value)})"`,
+    );
+  };
   const j = (value: any) => expr('(' + e.c(value) + ' | tojson)');
   const tagmap = (value: any) =>
     expr('(' + e.c(value ?? tags) + ' | map({key:.Key,value:.Value}) | from_entries)');
@@ -599,7 +715,7 @@ function cliSteps(template: CloudFormationTemplate, skip: string[] = []) {
                   );
         request('sqs', 'create-queue', { QueueName: n, Attributes: attrs, tags: tagmap(t) }, id);
         output(id, '.QueueUrl');
-        steps.push('sleep 1');
+        steps.push(windows ? 'Start-Sleep -Seconds 1' : 'sleep 1');
         break;
       }
       case 'AWS::SQS::QueuePolicy':
@@ -811,12 +927,24 @@ function cliSteps(template: CloudFormationTemplate, skip: string[] = []) {
             },
           },
         });
-        steps.push(
-          `aws configservice start-configuration-recorder --configuration-recorder-name "$(jq -nr ${quote(e.name(id))})"`,
+        namedCommand(
+          'configservice',
+          'start-configuration-recorder',
+          '--configuration-recorder-name',
+          e.name(id),
         );
         break;
       case 'AWS::Lambda::Function': {
-        steps.push(`printf %s ${quote(lambdaZip(p.Code.ZipFile))} | base64 -d > "$d/function.zip"`);
+        if (windows)
+          steps.push(
+            "$zipPath = Join-Path $PWD.ProviderPath 'function.zip'",
+            "$requestPath = Join-Path $PWD.ProviderPath 'request.json'",
+          );
+        steps.push(
+          windows
+            ? `[IO.File]::WriteAllBytes($zipPath, [Convert]::FromBase64String(${psQuote(lambdaZip(p.Code.ZipFile))}))`
+            : `printf %s ${quote(lambdaZip(p.Code.ZipFile))} | base64 -d > "$d/function.zip"`,
+        );
         const input: Record<string, any> = { ...p, FunctionName: n, Tags: tagmap(t) };
         delete input.Code;
         if (input.Environment)
@@ -828,11 +956,17 @@ function cliSteps(template: CloudFormationTemplate, skip: string[] = []) {
               ]),
             ),
           };
-        steps.push(
-          `jq -cn ${quote(e.c(input))} > "$d/request.json"`,
-          `${apiBootstrap ? 'retry_api_setup ' : ''}aws lambda create-function --cli-input-json "file://$d/request.json" --zip-file "fileb://$d/function.zip"`,
-          `aws lambda wait function-active-v2 --function-name "$(jq -nr ${quote(e.name(id))})"`,
-        );
+        if (windows)
+          steps.push(
+            `[IO.File]::WriteAllText($requestPath, (jq -cn ${psQuote(e.c(input))}), [Text.UTF8Encoding]::new($false))`,
+            'aws lambda create-function --cli-input-json "file://$requestPath" --zip-file "fileb://$zipPath" --no-cli-pager',
+          );
+        else
+          steps.push(
+            `jq -cn ${quote(e.c(input))} > "$d/request.json"`,
+            `${apiBootstrap ? 'retry_api_setup ' : ''}aws lambda create-function --cli-input-json "file://$d/request.json" --zip-file "fileb://$d/function.zip"`,
+          );
+        namedCommand('lambda', 'wait function-active-v2', '--function-name', e.name(id));
         break;
       }
       case 'AWS::Lambda::EventInvokeConfig':
@@ -864,7 +998,11 @@ function cliSteps(template: CloudFormationTemplate, skip: string[] = []) {
           Tags: t,
         });
         request('events', 'put-targets', { Rule: n, Targets: p.Targets }, id);
-        steps.push(`jq -e '.FailedEntryCount == 0' <<<"$result" >/dev/null`);
+        steps.push(
+          windows
+            ? `$result | jq -e '.FailedEntryCount == 0' | Out-Null`
+            : `jq -e '.FailedEntryCount == 0' <<<"$result" >/dev/null`,
+        );
         break;
       case 'AWS::CloudWatch::Alarm':
         request('cloudwatch', 'put-metric-alarm', { ...p, AlarmName: n, Tags: t });
@@ -890,7 +1028,7 @@ function cliSteps(template: CloudFormationTemplate, skip: string[] = []) {
           ResourcePolicy: p.ResourcePolicy ? j(p.ResourcePolicy.PolicyDocument) : undefined,
           Tags: t,
         });
-        steps.push(`aws dynamodb wait table-exists --table-name "$(jq -nr ${quote(e.name(id))})"`);
+        namedCommand('dynamodb', 'wait table-exists', '--table-name', e.name(id));
         if (p.PointInTimeRecoverySpecification)
           request('dynamodb', 'update-continuous-backups', {
             TableName: n,
@@ -1040,20 +1178,24 @@ function cliSteps(template: CloudFormationTemplate, skip: string[] = []) {
           ShardCount: p.ShardCount,
           Tags: tagmap(t),
         });
-        steps.push(`aws kinesis wait stream-exists --stream-name "$(jq -nr ${quote(e.name(id))})"`);
+        namedCommand('kinesis', 'wait stream-exists', '--stream-name', e.name(id));
         request('kinesis', 'start-stream-encryption', {
           StreamName: n,
           EncryptionType: 'KMS',
           KeyId: 'alias/aws/kinesis',
         });
-        steps.push(`aws kinesis wait stream-exists --stream-name "$(jq -nr ${quote(e.name(id))})"`);
+        namedCommand('kinesis', 'wait stream-exists', '--stream-name', e.name(id));
         request('kinesis', 'increase-stream-retention-period', {
           StreamName: n,
           RetentionPeriodHours: 72,
         });
         break;
       case 'AWS::Kinesis::ResourcePolicy':
-        steps.push(`aws kinesis wait stream-exists --stream-name "$NAME"`);
+        steps.push(
+          windows
+            ? `aws kinesis wait stream-exists --stream-name $env:NAME`
+            : `aws kinesis wait stream-exists --stream-name "$NAME"`,
+        );
         request('kinesis', 'put-resource-policy', {
           ResourceARN: p.ResourceArn,
           Policy: j(p.ResourcePolicy),
@@ -1121,9 +1263,17 @@ function cliSteps(template: CloudFormationTemplate, skip: string[] = []) {
             ],
             TagSpecifications: [{ ResourceType: 'security-group-rule', Tags: t }],
           });
-        steps.push(
-          `if err=$(aws ec2 revoke-security-group-egress --group-id "$R_${id}" --ip-permissions '[{"IpProtocol":"-1","Ipv6Ranges":[{"CidrIpv6":"::/0"}]}]' 2>&1); then :; elif [[ "$err" != *"(InvalidPermission.NotFound)"* ]]; then printf '%s\\n' "$err" >&2; exit 1; fi`,
-        );
+        if (windows)
+          steps.push(
+            '$PSNativeCommandUseErrorActionPreference = $false',
+            `$errorOutput = & aws ec2 revoke-security-group-egress --group-id $env:R_${id} --ip-permissions '[{"IpProtocol":"-1","Ipv6Ranges":[{"CidrIpv6":"::/0"}]}]' 2>&1`,
+            'if ($LASTEXITCODE -ne 0 -and ($errorOutput -join "`n") -notlike "*(InvalidPermission.NotFound)*") { throw ($errorOutput -join "`n") }',
+            '$PSNativeCommandUseErrorActionPreference = $true',
+          );
+        else
+          steps.push(
+            `if err=$(aws ec2 revoke-security-group-egress --group-id "$R_${id}" --ip-permissions '[{"IpProtocol":"-1","Ipv6Ranges":[{"CidrIpv6":"::/0"}]}]' 2>&1); then :; elif [[ "$err" != *"(InvalidPermission.NotFound)"* ]]; then printf '%s\\n' "$err" >&2; exit 1; fi`,
+          );
         for (const rule of p.SecurityGroupEgress)
           request('ec2', 'authorize-security-group-egress', {
             GroupId: ref(id),
@@ -1163,13 +1313,14 @@ function directCommand(
   template: CloudFormationTemplate,
   kind: string,
   inputs: string[] = ['NAME'],
+  platform: CommandPlatform = 'linux',
 ) {
   // A short service-only command would omit the optional access policies.
   const hasPolicies = Object.values(template.Resources).some(
     resource => resource.Type === 'AWS::IAM::ManagedPolicy',
   );
   const simple = hasPolicies || template.Resources.LogEncryptionKey ? null : simpleCommand(kind);
-  if (simple) return simple;
+  if (simple && platform === 'linux') return simple;
   const source = structuredClone(template);
   if (kind === 'security-groups') {
     source.Resources = {
@@ -1177,6 +1328,40 @@ function directCommand(
         source.Resources['Fn::ForEach::SecurityGroups'][2]['SecurityGroup&{GroupName}'],
     };
     delete source.Outputs;
+  }
+  if (platform === 'windows') {
+    const nameKey = inputs.includes('NAME')
+      ? 'NAME'
+      : inputs.includes('ROLE_NAME')
+        ? 'ROLE_NAME'
+        : null;
+    const body = [
+      '$env:REGION = if ($env:AWS_REGION) { $env:AWS_REGION } elseif ($env:AWS_DEFAULT_REGION) { $env:AWS_DEFAULT_REGION } else { aws configure get region }',
+      `$env:NAME = ${nameKey ? `$env:${nameKey}` : psQuote(stackName(kind, inputs))}`,
+      '$identity = aws sts get-caller-identity --output json | ConvertFrom-Json',
+      '$env:ACCOUNT_ID = $identity.Account',
+      "$env:PARTITION = $identity.Arn.Split(':')[1]",
+    ];
+    if (template.Parameters?.RoleArn)
+      body.push(
+        '$env:ROLE_ARN = aws iam get-role --role-name $env:ROLE_NAME --query Role.Arn --output text',
+      );
+    const steps = cliSteps(source, [], platform);
+    if (kind === 'security-groups')
+      body.push(
+        "foreach ($groupName in $env:SG_NAMES.Split(',')) {",
+        '$env:SG_NAME = $groupName',
+        ...steps,
+        '}',
+      );
+    else body.push(...steps);
+    if (['http-api', 'rest-api', 'ecs'].includes(kind)) {
+      const outputs = Object.fromEntries(
+        Object.entries(source.Outputs ?? {}).map(([name, output]) => [name, output.Value]),
+      );
+      body.push(`jq -n ${psQuote(compiler(source).c(outputs))}`);
+    }
+    return powershellScript(body, ['TAG_KEY', 'TAG_VALUE', ...inputs]);
   }
   const steps = [
     ...(Object.values(source.Resources).some(r => r.Type === 'AWS::Lambda::Function')
@@ -1215,7 +1400,48 @@ function directCommand(
   );
 }
 
-export function securityCommand(template: CloudFormationTemplate) {
+export function securityCommand(
+  template: CloudFormationTemplate,
+  platform: CommandPlatform = 'linux',
+) {
+  if (platform === 'windows')
+    return powershellScript(
+      [
+        '$env:REGION = if ($env:AWS_REGION) { $env:AWS_REGION } elseif ($env:AWS_DEFAULT_REGION) { $env:AWS_DEFAULT_REGION } else { aws configure get region }',
+        '$identity = aws sts get-caller-identity --output json | ConvertFrom-Json',
+        '$env:ACCOUNT_ID = $identity.Account',
+        "$env:PARTITION = $identity.Arn.Split(':')[1]",
+        "$tags = jq -cn '{(env.TAG_KEY):env.TAG_VALUE}'",
+        '$detector = aws guardduty list-detectors --query "DetectorIds[0]" --output text',
+        '$analyzers = (aws accessanalyzer list-analyzers --output json) -join "`n"',
+        `$analyzers | jq -e 'all(.analyzers[]; .name != env.NAME or .type == "ACCOUNT") and all(.analyzers[] | select(.type=="ACCOUNT"); .status=="ACTIVE" or .status=="CREATING")' | Out-Null`,
+        `$analyzer = $analyzers | jq -r '.analyzers[] | select(.type=="ACCOUNT") | .arn'`,
+        "if ($detector -eq 'None') {",
+        '$detector = aws guardduty create-detector --enable --finding-publishing-frequency FIFTEEN_MINUTES --tags $tags --query DetectorId --output text',
+        '} else {',
+        'aws guardduty update-detector --detector-id $detector --enable --finding-publishing-frequency FIFTEEN_MINUTES',
+        'aws guardduty tag-resource --resource-arn "arn:$($env:PARTITION):guardduty:$($env:REGION):$($env:ACCOUNT_ID):detector/$detector" --tags $tags',
+        '}',
+        'if ($analyzer) { aws accessanalyzer tag-resource --resource-arn $analyzer --tags $tags } else {',
+        '$analyzer = aws accessanalyzer create-analyzer --analyzer-name $env:NAME --type ACCOUNT --tags $tags --query arn --output text',
+        '}',
+        '$env:R_Detector = $detector',
+        `$destination = aws guardduty list-publishing-destinations --detector-id $detector --query "Destinations[?DestinationType=='S3'].DestinationId | [0]" --output text`,
+        "if ($destination -eq 'None') {",
+        ...cliSteps(template, ['Detector', 'Analyzer'], platform),
+        '$destination = $env:R_GuardDutyFindingExport',
+        '}',
+        'for ($attempt = 0; $attempt -lt 12; $attempt++) {',
+        '$exportStatus = aws guardduty describe-publishing-destination --detector-id $detector --destination-id $destination --query Status --output text',
+        "if ($exportStatus -eq 'PUBLISHING') { break }",
+        'if ($exportStatus -ne \'PENDING_VERIFICATION\') { throw "GuardDuty export is $exportStatus; check its bucket and KMS policies." }',
+        'Start-Sleep -Seconds 5',
+        '}',
+        "if ($exportStatus -ne 'PUBLISHING') { throw 'GuardDuty export is still pending verification.' }",
+        '"Detector: $detector`nAnalyzer: $analyzer`nFindings export: $destination"',
+      ],
+      ['TAG_KEY', 'TAG_VALUE', 'NAME'],
+    );
   return shell(
     [
       ...identity(),
