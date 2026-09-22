@@ -59,12 +59,12 @@
 </svelte:head>
 
 <div class="sticky top-0 z-30 border-b border-white/5 bg-[rgb(17,16,16)]/90 backdrop-blur-md">
-  <div class="mx-auto flex max-w-350 flex-wrap items-center gap-3 px-4 py-3">
-    <a href="/worldskills" class="shrink-0 text-sm text-slate-400 hover:text-white">← worldskills</a
+  <div class="flex flex-wrap gap-3 items-center py-3 px-4 mx-auto max-w-350">
+    <a href="/worldskills" class="text-sm hover:text-white shrink-0 text-slate-400">← worldskills</a
     >
-    <h1 class="min-w-0 flex-1 truncate text-lg font-bold">Powertools</h1>
+    <h1 class="flex-1 min-w-0 text-lg font-bold truncate">Powertools</h1>
     <div
-      class="order-last flex w-full shrink-0 gap-1 sm:order-none sm:w-auto"
+      class="flex order-last gap-1 w-full sm:order-none sm:w-auto shrink-0"
       role="group"
       aria-label="Command platform"
     >
@@ -80,24 +80,19 @@
       >
     </div>
     <button
-      class="copy-button lg:hidden"
+      class="lg:hidden copy-button"
       aria-expanded={menuOpen}
       onclick={() => (menuOpen = !menuOpen)}>Contents</button
     >
   </div>
 </div>
 
-<div class="mx-auto flex w-full max-w-350 gap-8 px-4" style="--sidebar-active-border: #94a3b8">
+<div class="flex gap-8 px-4 mx-auto w-full max-w-350" style="--sidebar-active-border: #94a3b8">
   <SidebarNav {items} bind:menuOpen />
-  <main class="min-w-0 flex-1 space-y-8 py-6">
-    <p class="text-sm text-slate-400">
-      {platform === 'windows'
-        ? 'CloudFormation and setup commands support Windows PowerShell 5.1 with AWS CLI v2 and curl.exe. Direct AWS CLI recipes require PowerShell 7.4+ (pwsh) and jq.'
-        : 'Run in Bash with AWS CLI v2. Direct AWS CLI recipes also use jq.'}
-    </p>
+  <main class="flex-1 py-6 space-y-8 min-w-0">
     {#each data.groups as group}
       <section aria-labelledby={group.id}>
-        <h2 id={group.id} class="mb-3 scroll-mt-24 text-2xl font-bold">{group.title}</h2>
+        <h2 id={group.id} class="mb-3 text-2xl font-bold scroll-mt-24">{group.title}</h2>
         <div class="space-y-4">
           {#each group.recipes as snippet}
             {@const mode = commandModes[snippet.id] ?? 'cfn'}
@@ -121,13 +116,13 @@
                   : deployment.commandHtml}
             <article
               id={snippet.id}
-              class="min-w-0 scroll-mt-24 overflow-hidden rounded-xl border border-white/10 bg-white/[0.02]"
+              class="overflow-hidden min-w-0 rounded-xl border scroll-mt-24 border-white/10 bg-white/[0.02]"
             >
               <div
-                class="flex items-center justify-between gap-3 border-b border-white/5 px-4 py-2.5"
+                class="flex gap-3 justify-between items-center py-2.5 px-4 border-b border-white/5"
               >
                 <h3 class="min-w-0 text-sm font-semibold">{snippet.title}</h3>
-                <div class="flex shrink-0 items-center gap-2">
+                <div class="flex gap-2 items-center shrink-0">
                   {#if deployment.templateFile && !isCli}
                     <a
                       class="copy-button"
@@ -150,7 +145,7 @@
               </div>
               {#if snippet.cliCommand || snippet.serviceOnly}
                 <div
-                  class="flex flex-wrap gap-2 border-b border-white/5 px-4 py-2"
+                  class="flex flex-wrap gap-2 py-2 px-4 border-b border-white/5"
                   role="group"
                   aria-label={`${snippet.title} deployment method`}
                 >
@@ -175,13 +170,13 @@
                 </div>
               {/if}
               {#if mode === 'serviceOnly'}
-                <p class="border-b border-white/5 px-4 py-2 text-xs text-slate-400">
+                <p class="py-2 px-4 text-xs border-b border-white/5 text-slate-400">
                   Skips optional access policies. Required service roles still need IAM permissions.
                 </p>
               {/if}
               {#if !snippet.documentOnly && snippet.env.length}
                 <div
-                  class="flex flex-wrap gap-1.5 border-b border-white/5 px-4 py-2"
+                  class="flex flex-wrap gap-1.5 py-2 px-4 border-b border-white/5"
                   role="group"
                   aria-label="Environment variables (* required)"
                 >
@@ -207,7 +202,7 @@
               {/if}
               <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to focus the code to scroll horizontally.) -->
               <div
-                class="code-wrap overflow-x-auto"
+                class="overflow-x-auto code-wrap"
                 class:command-code={!snippet.documentOnly}
                 tabindex="0"
                 role="region"
@@ -216,13 +211,13 @@
                 {@html snippet.documentOnly ? deployment.documentHtml! : commandHtml}
               </div>
               {#if deployment.cfnTagNote && !isCli}
-                <p class="border-t border-white/5 px-4 py-2 text-xs text-slate-400">
+                <p class="py-2 px-4 text-xs border-t border-white/5 text-slate-400">
                   {deployment.cfnTagNote}
                 </p>
               {/if}
               {#if !snippet.documentOnly && deployment.documentCode !== null && deployment.documentHtml !== null}
                 <details class="border-t border-white/10">
-                  <summary class="cursor-pointer px-4 py-2.5 text-sm text-slate-300"
+                  <summary class="py-2.5 px-4 text-sm cursor-pointer text-slate-300"
                     >{snippet.documentTitle}{mode === 'serviceOnly' ? ' service only' : ''}</summary
                   >
                   <div class="flex justify-end px-4 pb-2">
@@ -237,7 +232,7 @@
                   </div>
                   <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to focus the code to scroll horizontally.) -->
                   <div
-                    class="code-wrap overflow-x-auto"
+                    class="overflow-x-auto code-wrap"
                     tabindex="0"
                     role="region"
                     aria-label={`${snippet.title} ${snippet.documentLanguage.toUpperCase()}`}
