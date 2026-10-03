@@ -78,6 +78,27 @@
     </a>
     ) 🇨🇭
   </p>
+
+  <div class="flex flex-row gap-6 w-11/12 max-w-[1400px]">
+    <div class="flex flex-col items-center gap-1 flex-1">
+      <span class="w-32 text-center rounded-sm shadow-sm bg-stone-600/30 text-stone-50/40">
+        🖋️ cheatsheet
+      </span>
+      <span class="text-slate-100/40 text-center">checklists, snippets and commands</span>
+    </div>
+    <div class="flex flex-col items-center gap-1 flex-1">
+      <span class="w-24 text-center rounded-sm shadow-sm bg-stone-600/30 text-stone-50/40">
+        📢 yappin
+      </span>
+      <span class="text-slate-100/40 text-center">full scale yappin session about services</span>
+    </div>
+    <div class="flex flex-col items-center gap-1 flex-1">
+      <span class="w-18 text-center rounded-sm shadow-sm bg-stone-600/30 text-stone-50/40">
+        🤏 mini
+      </span>
+      <span class="text-slate-100/40 text-center">tiny personal service notes</span>
+    </div>
+  </div>
 </div>
 
 <div class="flex flex-col gap-4 items-center my-10">
@@ -121,9 +142,24 @@
           href="/worldskills/{key}"
           class="flex flex-col gap-2 p-4 w-full rounded-2xl transition-all apple-glass"
         >
-          <h1 class="text-lg font-bold cursor-pointer lg:text-xl hover:underline">
-            {project.title}
-          </h1>
+          <div class="flex flex-row items-center justify-between">
+            <h1 class="text-lg font-bold cursor-pointer lg:text-xl hover:underline">
+              {project.title}
+            </h1>
+            {#if project.type === 'mini'}
+              <div class="w-18 text-center rounded-sm shadow-sm bg-stone-600/30 text-stone-50/40">
+                🤏 {project.type}
+              </div>
+            {:else if project.type === 'cheatsheet'}
+              <div class="w-32 text-center rounded-sm shadow-sm bg-stone-600/30 text-stone-50/40">
+                🖋️ {project.type}
+              </div>
+            {:else if project.type === 'yappin'}
+              <div class="w-24 text-center rounded-sm shadow-sm bg-stone-600/30 text-stone-50/40">
+                📢 {project.type}
+              </div>
+            {/if}
+          </div>
 
           <p class="flex flex-wrap gap-1 justify-start text-sm sm:text-lg">
             <span class="text-slate-200/40">{project.published}</span>

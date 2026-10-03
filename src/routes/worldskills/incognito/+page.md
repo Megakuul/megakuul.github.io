@@ -3,8 +3,6 @@
     import Note from "../Note.svelte";
 </script>
 
-## Table of Contents
-
 ### User Pools
 
 User pools are actually just a fully hosted OIDC providers that can define multiple apps and can also authenticate users through other federated OIDC providers.  

@@ -2,8 +2,6 @@
     import Quirk from "../Quirk.svelte";
 </script>
 
-## Table of Contents
-
 ## Watch Out 👀
 
 - Events in CloudTrail are batched: It can take up to 5 minutes until events arrive in the trail.

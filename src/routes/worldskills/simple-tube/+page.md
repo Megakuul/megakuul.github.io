@@ -3,7 +3,7 @@
     import Note from "../Note.svelte";
 </script>
 
-## Table of Contents
+## SQS Queues
 
 - Duplicated id takes precedence over deduplication content 
     -> content deduplicate is ONLY used if NO dedupe id is set, otherwise the dedupe id is the only information considered.

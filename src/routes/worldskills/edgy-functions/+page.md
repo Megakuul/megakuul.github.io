@@ -5,7 +5,7 @@
 
 ## Table of Contents
 
-### Python
+## Python
 
 In the rare case you find yourself writing a python function (please immediately inform your supervisor and tell him this is a generally bad idea), it's important to understand that this is a mess 🗑️
 
@@ -98,7 +98,7 @@ docker push 111111111111.dkr.ecr.eu-central-1.amazonaws.com/<yournamespace>/<you
 
 10. Switch to Go on AL2023 🗿
 
-### Alias Pointers 👈
+## Alias Pointers 👈
 
 Lambda uses versions, but since the average edge-function-chad uses Arch Linux, rolling their updates on the bleeding edge 🩸, they added a `$LATEST` version.
 The `$LATEST` version is functionally equivalent to the container image `latest` tag.
@@ -118,27 +118,25 @@ This feature allows you to shift a certain amount of requests to another version
 Under the hood <b>CodeDeploy</b> heavily uses this feature, however because it is a native lambda feature you can also integrate it to custom cd pipelines.
 </Note>
 
-### Invocation Types
+## Invocation Types
 
-#### DryRun
+### DryRun
 
 Performs a validation that checks if the function version exists and if you have access to invoke it.
 Notice that this is a real command to the AWS API (creates a CloudTrail data event) and not just a CLI parameter.
 
-#### Event
+### Event
 
 Executes asynchron which returns 202 immediately and sends the lambda response to the configured destination (if any).
 
 **Exceptions**: If the function throws or returns a non-zero exit code it is retried up 2 times (invoked 3 times in total with this pattern: `1: 0s 2: 1m 3: 2m`).
 
-#### RequestResponse
+### RequestResponse
 
 Executes synchron and waits for the response; this effectively hijacks the returned event which means it is _NOT_ forwarded to configured event destinations.
 
 **Exceptions**: If the function throws or returns a non-zero exit code it returns a `"FunctionError": "Unhandled"` with an error event type as response and does NOT retry.
 
-
-
-#### Notes
+## Notes
 
 - use pino logger or enable JSON and `console.log({})` for wrapping. Alternative you can use `process.stdout.write(JSON.stringify({}) + "\n")` to write RAW logs

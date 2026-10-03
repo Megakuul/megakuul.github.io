@@ -3,8 +3,6 @@
     import Note from "../Note.svelte";
 </script>
 
-## Table of Contents
-
 <Note type="caution">
 Caution: Please be aware that observing a cluster deployment leads to death, the process duration can easily outlive YOU.
 <br>

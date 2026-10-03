@@ -3,8 +3,6 @@
     import Note from "../Note.svelte";
 </script>
 
-## Table of Contents
-
 ## Watch Out 👀
 
 - tags in rules are hidden in wizard

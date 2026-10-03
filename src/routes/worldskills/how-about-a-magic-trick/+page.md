@@ -3,11 +3,10 @@
     import Note from "../Note.svelte";
 </script>
 
-## Table of Contents
-
-![magictrick](/images/magictrick.gif)
 
 ## Tricks
+
+![magictrick](/images/magictrick.gif)
 
 ### Abuse the aws cli as json api wrapper 📡
 

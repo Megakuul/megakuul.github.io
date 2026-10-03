@@ -3,8 +3,6 @@
     import Note from "../Note.svelte";
 </script>
 
-## Table of Contents
-
 ## Johnny English 🕵️
 
 On Amazon AL2023 install the CloudWatch agent with this:
@@ -212,6 +210,8 @@ Here a big beautiful configuration example for the config that must be at `/opt/
 <Note type="caution">
 This file is <b>strict JSON</b>: no comments, no trailing commas. The agent doesn't tell you what it hates either, it just refuses to start — check <b>/opt/aws/amazon-cloudwatch-agent/logs/configuration-validation.log</b>.
 </Note>
+
+<br>
 
 <Quirk score={3.5}>
 The agent doesn't read <b>amazon-cloudwatch-agent.json</b> directly. On start it translates it into <b>etc/amazon-cloudwatch-agent.toml</b> and runs that. So if you edit the JSON without doing <b>amazon-cloudwatch-agent-ctl -a fetch-config -s -m ec2 -c file:...</b>, the agent happily keeps running the old config and you debug nothing for 20 minutes.

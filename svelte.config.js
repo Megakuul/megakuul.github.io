@@ -1,4 +1,3 @@
-import remarkExtractLinks from './references.js';
 import { mdsvex } from 'mdsvex';
 import adapter from '@sveltejs/adapter-static';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
@@ -33,10 +32,7 @@ const config = {
         concepts: `${projectRoot}/src/routes/concepts/concept.layout.svelte`,
         worldskills: `${projectRoot}/src/routes/worldskills/worldskills.layout.svelte`,
       },
-      remarkPlugins: [
-        [autotoc, { heading: 'Table of Contents', tight: true }],
-        [remarkExtractLinks, { heading: 'References' }],
-      ],
+      remarkPlugins: [[autotoc, { heading: 'Table of Contents', tight: true }]],
       rehypePlugins: [autoslug, autolink],
     }),
   ],

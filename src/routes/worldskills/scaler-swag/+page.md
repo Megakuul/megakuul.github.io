@@ -2,8 +2,6 @@
     import Quirk from "../Quirk.svelte";
 </script>
 
-## Table of Contents
-
 ## Autoscaler
 
 Official and perfect service description:
