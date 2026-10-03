@@ -1,7 +1,5 @@
 Dinosaur API is a project made just as an example for a cloud application on Google Cloud.
 
-## Table of Contents
-
 ## Purpose
 
 We had to create a presentation about an IT topic in our english classes.

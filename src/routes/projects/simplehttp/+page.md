@@ -1,7 +1,5 @@
 Lightweight and simple http library implementation for building internal server endpoints.
 
-## Table of Contents
-
 ## Purpose
 
 The purpose of SimpleHTTP is to provide an extremely simple implementation of an HTTP/1.1 compatible server library.

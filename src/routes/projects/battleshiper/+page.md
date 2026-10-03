@@ -1,7 +1,5 @@
 Serverless automation platform that can scale faster than the GameStop stock (with a name parodied from **[shiper](https://shiper.app)**).
 
-## Table of Contents
-
 ## Purpose
 
 After I sadly overheard that the **[shiper](https://shiper.app)** platform does NOT support the GOAT and Messias of all js frameworks, I started to build this bad boy.

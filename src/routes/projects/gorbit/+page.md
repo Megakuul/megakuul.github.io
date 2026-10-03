@@ -1,7 +1,5 @@
 Gorbit is a fast and simple loadbalancer that operates based on **TCP** network streams.
 
-## Table of Contents
-
 ## Purpose
 
 The majority of load balancers have numerous functions, which makes them quite difficult to use. Gorbit should only do one job, loadbalance, without too many extra features.

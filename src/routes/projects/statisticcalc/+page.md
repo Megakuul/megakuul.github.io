@@ -1,7 +1,5 @@
 The Statistic Calculator is a very simple web app that displays some statistical relationships in bulk.
 
-## Table of Contents
-
 ## Purpose
 
 In Mathematical classes, we covered the topic of stochastic. Since I needed to master it in preparation for the forthcoming examination, I decided to implement it using code.

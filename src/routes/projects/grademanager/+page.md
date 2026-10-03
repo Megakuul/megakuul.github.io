@@ -1,7 +1,5 @@
 **GradeManager** is an software that should help people manage their school grades.
 
-## Table of Contents
-
 ## Purpose
 
 The **GradeManager** project started when I created the **Legacy GradeManager** with the **.Net Framework**, just for a friend of mine.

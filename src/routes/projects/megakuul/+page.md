@@ -1,7 +1,5 @@
 Megakuul.ch is my personal website, where I show off some of my projects I've done in the past.  
 
-## Table of Contents
-
 ## Purpose
 
 The Megakuul.ch is meant as a simple portfolio website, where I also wanted to write some thoughts about my projects.

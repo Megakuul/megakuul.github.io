@@ -1,7 +1,5 @@
 Linosteffen.ch is the website for the photographer Lino Steffen.
 
-## Table of Contents
-
 ## Purpose
 
 Lino Steffen had a simple **Webflow.io** website befor this, so I thought that I'm going to build a Website for him.

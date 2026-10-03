@@ -1,7 +1,5 @@
 Simple Password Generator, with a good-looking UI.
 
-## Table of Contents
-
 ## Purpose
 
 Before this project, I was only programming some small PowerShell Scripts. As I heard of Flutter, I was genuinely interested in trying it out. 

@@ -1,7 +1,5 @@
 The Chatapp is a simple example to deploy on AWS with Terraform.
 
-## Table of Contents
-
 ## Purpose
 
 The goal was to create an example application that can be deployed on AWS with Infrastructur as Code.

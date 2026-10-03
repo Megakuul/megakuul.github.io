@@ -1,5 +1,4 @@
 The **Megakuul Commander** (short MKC) is a lightweight application for managing the filesystem, that got inspired by the **Total Commander**.  
-## Table of Contents
 
 ## Purpose
 

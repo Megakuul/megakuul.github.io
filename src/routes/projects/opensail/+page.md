@@ -1,7 +1,5 @@
 Sophisticated regatta rating system that is so transparent, since it dropped, it has become pretty quiet around Ignotus Peverell's cloak.
 
-## Table of Contents
-
 ## Purpose
 
 This project is part of a final thesis about regatta sailing. For the thesis, I researched various systems that handicap different boats in regattas (without a handicap, regattas are basically supercell-level pay-to-win). During my journey, I found various interesting concepts. For example, there is [ORC](https://orc.org), a company that measures vessels and then uses a velocity prediction program to analyze the boat's speed from different angles. On the other hand, there are local systems such as the Yardstick, which use empirical values and determine the factor of a ship as if they were Caesar judging a gladiator.

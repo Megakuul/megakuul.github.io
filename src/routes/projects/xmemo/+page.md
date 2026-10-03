@@ -1,7 +1,5 @@
 The XMemo platform is a full stack webapplication where you can play memory games against other players.
 
-## Table of Contents
-
 ## Purpose
 
 Memory is a dull game by itself, you just sit there with someone else and discover cards, hoping to get two similar ones. But where is the fun if the winner gets nothing?

@@ -1,7 +1,5 @@
 The **Backup Analyzer** is a simple web tool for the analysis of backup strategies and retentions.
 
-## Table of Contents
-
 ## Purpose
 
 Since backups are frequently viewed as auxiliary, many companies overlook the importance of adopting robust and reliable backup solutions.

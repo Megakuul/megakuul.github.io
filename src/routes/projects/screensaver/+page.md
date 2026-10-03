@@ -1,7 +1,5 @@
 Drippin windows screensaver rendering on the CPU like a real gigachad (give me an award for this logo).
 
-## Table of Contents
-
 ## Purpose
 
 You know how it is in medieval ages, there is a high demand for screen savers (to save screens).

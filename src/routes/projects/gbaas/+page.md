@@ -1,7 +1,5 @@
 **Gitbackup-as-a-Service** is as the name suggests, a cloud-native solution to back up Github repositories.
 
-## Table of Contents
-
 ## Purpose
 
 This project should be a simple solution to automatically back up repositories from GitHub to another location.

@@ -1,7 +1,5 @@
 **Orbstrike** should be a simple 2D multiplayer game running on a Flutter Flame frontend while streaming updates live over a gRPC stream. 
 
-## Table of Contents
-
 ## Purpose
 
 The idea when I started developing this project was to create a basic multiplayer game and build a backend server from scratch. I've never done any research on how game servers scale. I just wanted to build it from scratch.

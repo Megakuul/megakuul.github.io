@@ -8,6 +8,14 @@ interface Project {
 }
 
 const projects: Record<string, Project> = {
+  zen: {
+    title: 'Zen',
+    description: 'Reward based calendar to structure your day',
+    published: '18.02.2026',
+    link: 'https://github.com/Megakuul/zen',
+    image: 'zen.svg',
+    techs: ['svelte', 'go', 'pulumi'],
+  },
   opensail: {
     title: 'Opensail',
     description: 'Sophisticated Regatta Rating System',

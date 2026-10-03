@@ -1,7 +1,5 @@
 Fresh rebuild of the original jupa-thun website with cool parallax effects.
 
-## Table of Contents
-
 ## Purpose
 
 This project has really no purpose, the only purpose was that I wanted to create some cool animations with a svelte library `svelte-parallax` I found.

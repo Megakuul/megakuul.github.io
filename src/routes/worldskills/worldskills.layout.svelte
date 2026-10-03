@@ -11,7 +11,6 @@
   let description = $derived(list[key].description);
   let published = $derived(list[key].published);
   let services = $derived(list[key].services);
-  let type = $derived(list[key].type);
   const publishedIso = $derived.by(() => {
     const [day, month, year] = published.split('.');
     return new Date(Number(year), Number(month) - 1, Number(day)).toISOString();

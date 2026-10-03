@@ -1,7 +1,5 @@
 Proof of concept proxy allowing central management of android devices via adb.
 
-## Table of Contents
-
 ## Purpose
 
 There are days when I finally want to continue with my running projects, but y'all know how it is...

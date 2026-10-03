@@ -1,7 +1,5 @@
 Rizzful python single player game letting the player fight against a vicious wizard.
 
-## Table of Contents
-
 ## Purpose
 
 This game was built as part of a school project where we had to develop some random shit interacting with a database.
