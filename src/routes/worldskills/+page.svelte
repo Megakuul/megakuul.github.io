@@ -140,10 +140,10 @@
       >
         <a
           href="/worldskills/{key}"
-          class="flex flex-col gap-2 p-4 w-full rounded-2xl transition-all apple-glass"
+          class="flex flex-col gap-2 p-4 w-full rounded-2xl transition-all duration-500 apple-glass hover:scale-[1.005]"
         >
           <div class="flex flex-row items-center justify-between">
-            <h1 class="text-lg font-bold cursor-pointer lg:text-xl hover:underline">
+            <h1 class="text-lg font-bold cursor-pointer lg:text-xl">
               {project.title}
             </h1>
             {#if project.type === 'mini'}

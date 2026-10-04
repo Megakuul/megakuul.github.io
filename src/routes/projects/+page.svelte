@@ -106,11 +106,9 @@
       >
         <a
           href="/projects/{key}"
-          class="flex flex-col gap-2 p-4 w-full rounded-2xl transition-all apple-glass"
+          class="flex flex-col gap-2 p-4 w-full rounded-2xl transition-all duration-500 apple-glass hover:scale-[1.005]"
         >
-          <h1
-            class="flex flex-row gap-2 items-center text-lg font-bold cursor-pointer lg:text-xl hover:underline"
-          >
+          <h1 class="flex flex-row gap-2 items-center text-lg font-bold cursor-pointer lg:text-xl">
             {#if project.image}
               <img class="h-8" src="/images/{project.image}" alt={project.image} />
             {/if}

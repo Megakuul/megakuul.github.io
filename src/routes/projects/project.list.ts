@@ -8,6 +8,14 @@ interface Project {
 }
 
 const projects: Record<string, Project> = {
+  dynamitedb: {
+    title: '',
+    description: 'ST Database Engine running entirely on S3',
+    published: '13.08.2026',
+    link: 'https://github.com/Megakuul/dynamitedb',
+    image: 'dynamitedb.svg',
+    techs: ['go'],
+  },
   zen: {
     title: 'Zen',
     description: 'Reward based calendar to structure your day',
@@ -78,11 +86,11 @@ const projects: Record<string, Project> = {
     techs: ['c', 'msbuild', 'gdi32'],
   },
   simplehttp: {
-    title: 'SimpleHTTP',
+    title: '',
     description: 'A minimalistic HTTP server library, complying with basic HTTP/1.1 standards',
     published: '28.04.2024',
     link: 'https://github.com/megakuul/simplehttp',
-    image: '',
+    image: 'simplehttp.svg',
     techs: ['c++', 'bazel'],
   },
   jupa: {
